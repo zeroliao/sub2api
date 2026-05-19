@@ -79,3 +79,11 @@ Application code changes are not deployed by copying source to the server. The n
 5. Run Git-backed ops deployment from `zero007-sub2api-ops`.
 
 If the sibling ops repository is missing on a new machine, clone `git@github.com:zeroliao/zero007-sub2api-ops.git` next to this repository before doing production deployment work.
+
+## Deployment Consent Rule
+
+Do not deploy after code changes unless the user explicitly asked for deployment in the same request or confirmed it after being asked.
+
+- Direct deploy is allowed when the user says things like "改完并部署", "直接部署", "自动部署", "部署到服务器", or equivalent.
+- If the user only asks to implement, fix, optimize, or prepare a change, stop after local verification and ask before running any production deploy command.
+- `validate-candidate`, `doctor`, `status`, `active-slot`, and `logs` are allowed as checks, but `deploy`, `bluegreen-deploy`, `start-deploy`, and `start-bluegreen-deploy` require explicit deploy intent or confirmation.
