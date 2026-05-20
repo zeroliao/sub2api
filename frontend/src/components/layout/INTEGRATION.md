@@ -1,15 +1,15 @@
-# Layout Components Integration Guide
+# 布局组件集成指南
 
-## Quick Start
+## 快速开始
 
-### 1. Import Layout Components
+### 1. 导入布局组件
 
 ```typescript
 // In your view files
 import { AppLayout, AuthLayout } from '@/components/layout'
 ```
 
-### 2. Use in Routes
+### 2. 在路由中使用
 
 ```typescript
 // src/router/index.ts
@@ -136,7 +136,7 @@ router.beforeEach((to, from, next) => {
 export default router
 ```
 
-### 3. Initialize Stores in main.ts
+### 3. 在 main.ts 中初始化 Stores
 
 ```typescript
 // src/main.ts
@@ -160,7 +160,7 @@ authStore.checkAuth()
 app.mount('#app')
 ```
 
-### 4. Update App.vue
+### 4. 更新 App.vue
 
 ```vue
 <!-- src/App.vue -->
@@ -176,9 +176,9 @@ app.mount('#app')
 
 ---
 
-## View Component Templates
+## 视图组件模板
 
-### Authenticated Page Template
+### 已认证页面模板
 
 ```vue
 <!-- src/views/DashboardView.vue -->
@@ -199,7 +199,7 @@ import { AppLayout } from '@/components/layout'
 </script>
 ```
 
-### Auth Page Template
+### 认证页面模板
 
 ```vue
 <!-- src/views/auth/LoginView.vue -->
@@ -227,11 +227,11 @@ import { AuthLayout } from '@/components/layout'
 
 ---
 
-## Customization
+## 自定义
 
-### Changing Colors
+### 修改颜色
 
-The components use Tailwind's indigo color scheme by default. To change:
+组件默认使用 Tailwind 的 indigo 配色。如需修改：
 
 ```vue
 <!-- Change all instances of indigo-* to your preferred color -->
@@ -239,9 +239,9 @@ The components use Tailwind's indigo color scheme by default. To change:
 <div class="text-blue-600">  <!-- Instead of text-indigo-600 -->
 ```
 
-### Adding Custom Icons
+### 添加自定义图标
 
-Replace HTML entity icons with your preferred icon library:
+可以将 HTML entity 图标替换为偏好的图标库：
 
 ```vue
 <!-- Before (HTML entities) -->
@@ -251,9 +251,9 @@ Replace HTML entity icons with your preferred icon library:
 <ChartBarIcon class="h-5 w-5" />
 ```
 
-### Sidebar Customization
+### 自定义侧边栏
 
-Modify navigation items in `AppSidebar.vue`:
+在 `AppSidebar.vue` 中修改导航项：
 
 ```typescript
 // Add/remove/modify navigation items
@@ -264,9 +264,9 @@ const userNavItems = [
 ]
 ```
 
-### Header Customization
+### 自定义 Header
 
-Modify user dropdown in `AppHeader.vue`:
+在 `AppHeader.vue` 中修改用户下拉菜单：
 
 ```vue
 <!-- Add new dropdown items -->
@@ -282,19 +282,19 @@ Modify user dropdown in `AppHeader.vue`:
 
 ---
 
-## Mobile Responsive Behavior
+## 移动端响应式行为
 
 ### Sidebar
 
-- **Desktop (md+)**: Always visible, can be collapsed to icon-only view
-- **Mobile**: Hidden by default, shown via menu toggle in header
+- **Desktop (md+)**：始终可见，可折叠为仅图标视图。
+- **Mobile**：默认隐藏，通过 header 中的菜单按钮显示。
 
 ### Header
 
-- **Desktop**: Shows full user info and balance
-- **Mobile**: Shows compact view with hamburger menu
+- **Desktop**：显示完整用户信息和余额。
+- **Mobile**：显示紧凑视图和 hamburger 菜单。
 
-To improve mobile experience, you can add overlay and transitions:
+为了改善移动端体验，可以添加遮罩和过渡：
 
 ```vue
 <!-- AppSidebar.vue enhancement for mobile -->
@@ -320,9 +320,9 @@ To improve mobile experience, you can add overlay and transitions:
 
 ---
 
-## State Management Integration
+## 状态管理集成
 
-### Auth Store Usage
+### Auth Store 用法
 
 ```typescript
 import { useAuthStore } from '@/stores'
@@ -343,7 +343,7 @@ if (authStore.isAdmin) {
 const user = authStore.user
 ```
 
-### App Store Usage
+### App Store 用法
 
 ```typescript
 import { useAppStore } from '@/stores'
@@ -372,17 +372,17 @@ await appStore.withLoading(async () => {
 
 ---
 
-## Accessibility Features
+## 可访问性特性
 
-All layout components include:
+所有布局组件都包含：
 
-- **Semantic HTML**: Proper use of `<nav>`, `<header>`, `<main>`, `<aside>`
-- **ARIA labels**: Buttons have descriptive labels
-- **Keyboard navigation**: All interactive elements are keyboard accessible
-- **Focus management**: Proper focus states with Tailwind's `focus:` utilities
-- **Color contrast**: WCAG AA compliant color combinations
+- **语义化 HTML**：正确使用 `<nav>`、`<header>`、`<main>`、`<aside>`。
+- **ARIA labels**：按钮具备描述性 label。
+- **键盘导航**：所有交互元素都可通过键盘访问。
+- **焦点管理**：使用 Tailwind 的 `focus:` utilities 提供正确焦点状态。
+- **颜色对比度**：配色满足 WCAG AA。
 
-To enhance further:
+如需进一步增强：
 
 ```vue
 <!-- Add skip to main content link -->
@@ -400,9 +400,9 @@ To enhance further:
 
 ---
 
-## Testing
+## 测试
 
-### Unit Testing Layout Components
+### 布局组件单元测试
 
 ```typescript
 // AppHeader.test.ts
@@ -431,24 +431,24 @@ describe('AppHeader', () => {
 
 ---
 
-## Performance Optimization
+## 性能优化
 
-### Lazy Loading
+### 懒加载
 
-Views using layouts are already lazy loaded in the router example above.
+上面的路由示例中，使用布局的视图已经采用懒加载。
 
-### Code Splitting
+### 代码拆分
 
-Layout components are automatically code-split when imported:
+布局组件在导入时会自动参与代码拆分：
 
 ```typescript
 // This creates a separate chunk for layout components
 import { AppLayout } from '@/components/layout'
 ```
 
-### Reducing Re-renders
+### 减少重复渲染
 
-Layout components use `computed` refs to prevent unnecessary re-renders:
+布局组件使用 `computed` refs 避免不必要的重新渲染：
 
 ```typescript
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
@@ -457,28 +457,28 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 
 ---
 
-## Troubleshooting
+## 故障排查
 
-### Sidebar not showing
+### 侧边栏不显示
 
-- Check if `useAppStore` is properly initialized
-- Verify Tailwind classes are being processed
-- Check z-index conflicts with other components
+- 检查 `useAppStore` 是否正确初始化。
+- 确认 Tailwind classes 正在被处理。
+- 检查是否与其它组件存在 z-index 冲突。
 
-### Routes not highlighting in sidebar
+### 侧边栏路由未高亮
 
-- Ensure route paths match exactly
-- Check `isActive()` function logic
-- Verify `useRoute()` is working correctly
+- 确保 route path 完全匹配。
+- 检查 `isActive()` 函数逻辑。
+- 确认 `useRoute()` 正常工作。
 
-### User info not displaying
+### 用户信息不显示
 
-- Ensure auth store is initialized with `checkAuth()`
-- Verify user is logged in
-- Check localStorage for auth data
+- 确保 auth store 已通过 `checkAuth()` 初始化。
+- 确认用户已登录。
+- 检查 `localStorage` 中是否存在认证数据。
 
-### Mobile menu not working
+### 移动端菜单不工作
 
-- Verify `toggleSidebar()` is called correctly
-- Check responsive breakpoints (md:)
-- Test on actual mobile device or browser dev tools
+- 确认 `toggleSidebar()` 被正确调用。
+- 检查响应式断点（`md:`）。
+- 在真实移动设备或浏览器 dev tools 中测试。

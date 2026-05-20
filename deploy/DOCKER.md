@@ -1,8 +1,8 @@
-# Sub2API Docker Image
+# Sub2API Docker 镜像
 
-Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
+Sub2API 是一个用于分发和管理 AI 产品订阅 API 配额的 AI API 网关平台。
 
-## Quick Start
+## 快速开始
 
 ```bash
 docker run -d \
@@ -49,28 +49,28 @@ volumes:
   redis_data:
 ```
 
-## Environment Variables
+## 环境变量
 
-| Variable | Description | Required | Default |
-|----------|-------------|----------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | Yes | - |
-| `REDIS_URL` | Redis connection string | Yes | - |
-| `PORT` | Server port | No | `8080` |
-| `GIN_MODE` | Gin framework mode (`debug`/`release`) | No | `release` |
+| 变量 | 说明 | 必需 | 默认值 |
+|------|------|------|--------|
+| `DATABASE_URL` | PostgreSQL 连接字符串 | 是 | - |
+| `REDIS_URL` | Redis 连接字符串 | 是 | - |
+| `PORT` | 服务端口 | 否 | `8080` |
+| `GIN_MODE` | Gin 框架模式（`debug`/`release`） | 否 | `release` |
 
-## Supported Architectures
+## 支持架构
 
 - `linux/amd64`
 - `linux/arm64`
 
 ## Tags
 
-- `latest` - Latest stable release
-- `x.y.z` - Specific version
-- `x.y` - Latest patch of minor version
-- `x` - Latest minor of major version
+- `latest`：最新稳定版本
+- `x.y.z`：指定版本
+- `x.y`：指定 minor 版本的最新 patch
+- `x`：指定 major 版本的最新 minor
 
-## Links
+## 链接
 
 - [GitHub Repository](https://github.com/weishaw/sub2api)
 - [Documentation](https://github.com/weishaw/sub2api#readme)

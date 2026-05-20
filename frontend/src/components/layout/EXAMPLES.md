@@ -1,6 +1,6 @@
-# Layout Component Examples
+# 布局组件示例
 
-## Example 1: Dashboard Page
+## 示例 1：Dashboard 页面
 
 ```vue
 <template>
@@ -51,7 +51,7 @@ const balance = computed(() => authStore.user?.balance.toFixed(2) || '0.00')
 
 ---
 
-## Example 2: Login Page
+## 示例 2：登录页面
 
 ```vue
 <template>
@@ -141,7 +141,7 @@ async function handleSubmit() {
 
 ---
 
-## Example 3: API Keys Page with Custom Header Title
+## 示例 3：带自定义 Header 标题的 API Keys 页面
 
 ```vue
 <template>
@@ -221,7 +221,7 @@ const apiKeys = ref<ApiKey[]>([])
 
 ---
 
-## Example 4: Admin Users Page
+## 示例 4：管理员用户页面
 
 ```vue
 <template>
@@ -289,7 +289,7 @@ const users = ref<User[]>([])
 
 ---
 
-## Example 5: Profile Page
+## 示例 5：Profile 页面
 
 ```vue
 <template>
@@ -413,12 +413,12 @@ async function handleChangePassword() {
 
 ---
 
-## Tips for Using Layouts
+## 布局使用建议
 
-1. **Page Titles**: Set route meta to automatically display page titles in the header
-2. **Loading States**: Use `appStore.setLoading(true/false)` for global loading indicators
-3. **Toast Notifications**: Use `appStore.showSuccess()`, `appStore.showError()`, etc.
-4. **Authentication**: All authenticated pages should use `AppLayout`
-5. **Auth Pages**: Login and Register pages should use `AuthLayout`
-6. **Sidebar State**: The sidebar state persists across navigation
-7. **Mobile First**: All examples are responsive by default using Tailwind's mobile-first approach
+1. **页面标题**：设置 route meta，可在 header 中自动显示页面标题。
+2. **加载状态**：使用 `appStore.setLoading(true/false)` 管理全局加载指示器。
+3. **Toast 通知**：使用 `appStore.showSuccess()`、`appStore.showError()` 等方法。
+4. **认证页面外的业务页**：所有已认证页面都应使用 `AppLayout`。
+5. **认证页面**：Login 和 Register 页面应使用 `AuthLayout`。
+6. **侧边栏状态**：侧边栏状态会在导航过程中保持。
+7. **移动优先**：所有示例默认使用 Tailwind 的 mobile-first 方式实现响应式。

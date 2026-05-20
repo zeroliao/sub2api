@@ -1,12 +1,12 @@
-# Authentication Views Usage Examples
+# 认证视图使用示例
 
-This document provides practical examples of how to use the authentication views in the Sub2API frontend.
+本文提供 Sub2API 前端认证视图的实际使用示例。
 
-## Quick Start
+## 快速开始
 
-### 1. Login Flow
+### 1. 登录流程
 
-**Scenario:** User wants to log into their existing account
+**场景：** 用户希望登录已有账号。
 
 ```typescript
 // Route: /login
@@ -34,9 +34,9 @@ This document provides practical examples of how to use the authentication views
 //   - User can retry
 ```
 
-### 2. Registration Flow
+### 2. 注册流程
 
-**Scenario:** New user wants to create an account
+**场景：** 新用户希望创建账号。
 
 ```typescript
 // Route: /register
@@ -69,9 +69,9 @@ This document provides practical examples of how to use the authentication views
 //   - User can retry
 ```
 
-## Code Examples
+## 代码示例
 
-### Importing the Views
+### 导入视图
 
 ```typescript
 // Method 1: Direct import
@@ -86,7 +86,7 @@ const LoginView = () => import('@/views/auth/LoginView.vue')
 const RegisterView = () => import('@/views/auth/RegisterView.vue')
 ```
 
-### Using in Router
+### 在 Router 中使用
 
 ```typescript
 import { createRouter, createWebHistory } from 'vue-router'
@@ -114,7 +114,7 @@ const router = createRouter({
 export default router
 ```
 
-### Navigation to Auth Views
+### 导航到认证视图
 
 ```typescript
 // From template
@@ -139,7 +139,7 @@ router.push({
 });
 ```
 
-### Programmatic Auth Flow
+### 编程式认证流程
 
 ```typescript
 import { useAuthStore } from '@/stores'
@@ -182,9 +182,9 @@ async function register() {
 }
 ```
 
-## Validation Examples
+## 校验示例
 
-### Login Validation
+### 登录校验
 
 ```typescript
 // Valid inputs
@@ -198,7 +198,7 @@ async function register() {
 ❌ Password: "" → Error: "Password is required"
 ```
 
-### Registration Validation
+### 注册校验
 
 ```typescript
 // Valid inputs
@@ -217,9 +217,9 @@ async function register() {
 ❌ Confirm: "DifferentPass" → Error: "Passwords do not match"
 ```
 
-## Error Handling Examples
+## 错误处理示例
 
-### Backend Errors
+### 后端错误
 
 ```typescript
 // Example 1: Username already exists
@@ -254,7 +254,7 @@ async function register() {
 // Displayed: "Login failed. Please check your credentials and try again." (default)
 ```
 
-### Client-side Validation Errors
+### 客户端校验错误
 
 ```typescript
 // Multiple validation errors displayed simultaneously
@@ -268,9 +268,9 @@ errors = {
 // Each error appears below its respective input field with red styling
 ```
 
-## Testing Examples
+## 测试示例
 
-### Unit Test: Login View
+### 单元测试：Login View
 
 ```typescript
 import { describe, it, expect, vi } from 'vitest'
@@ -314,7 +314,7 @@ describe('LoginView', () => {
 })
 ```
 
-### E2E Test: Registration Flow
+### E2E 测试：注册流程
 
 ```typescript
 import { test, expect } from '@playwright/test'
@@ -355,9 +355,9 @@ test('shows validation errors for invalid inputs', async ({ page }) => {
 })
 ```
 
-## Integration with Navigation Guards
+## 与导航守卫集成
 
-### Router Guard Example
+### Router Guard 示例
 
 ```typescript
 import { useAuthStore } from '@/stores'
@@ -384,9 +384,9 @@ router.beforeEach((to, from, next) => {
 })
 ```
 
-## Customization Examples
+## 自定义示例
 
-### Custom Success Redirect
+### 自定义成功跳转
 
 ```typescript
 // In LoginView.vue
@@ -410,7 +410,7 @@ async function handleLogin(): Promise<void> {
 }
 ```
 
-### Custom Validation Rules
+### 自定义校验规则
 
 ```typescript
 // Custom password strength validation
@@ -432,7 +432,7 @@ if (!validatePasswordStrength(formData.password)) {
 }
 ```
 
-### Custom Error Handling
+### 自定义错误处理
 
 ```typescript
 // In RegisterView.vue
@@ -466,9 +466,9 @@ async function handleRegister(): Promise<void> {
 }
 ```
 
-## Accessibility Examples
+## 可访问性示例
 
-### Keyboard Navigation
+### 键盘导航
 
 ```typescript
 // Tab order:
@@ -482,7 +482,7 @@ async function handleRegister(): Promise<void> {
 // Escape key can be used to clear focus
 ```
 
-### Screen Reader Support
+### 屏幕阅读器支持
 
 ```html
 <!-- Proper labels for screen readers -->
@@ -506,9 +506,9 @@ async function handleRegister(): Promise<void> {
 </button>
 ```
 
-## Performance Considerations
+## 性能注意事项
 
-### Lazy Loading
+### 懒加载
 
 ```typescript
 // Router configuration with lazy loading
@@ -521,30 +521,30 @@ async function handleRegister(): Promise<void> {
 import LoginView from '@/views/auth/LoginView.vue'; // ❌ Eager loaded
 ```
 
-### Optimization Tips
+### 优化建议
 
-1. Use `v-once` for static content
-2. Debounce expensive validation operations
-3. Minimize reactive dependencies
-4. Use `shallowRef` for complex objects when possible
-5. Avoid unnecessary watchers
+1. 对静态内容使用 `v-once`。
+2. 对昂贵的校验操作做 debounce。
+3. 尽量减少响应式依赖。
+4. 复杂对象在适合时使用 `shallowRef`。
+5. 避免不必要的 watchers。
 
-## Security Best Practices
+## 安全最佳实践
 
-1. Never log passwords or tokens
-2. Use HTTPS in production
-3. Implement rate limiting on backend
-4. Validate all inputs server-side
-5. Use secure password hashing (bcrypt, argon2)
-6. Implement CSRF protection
-7. Set secure cookie flags
-8. Use Content Security Policy headers
-9. Sanitize all user inputs
-10. Implement account lockout after failed attempts
+1. 不要记录密码或 token。
+2. 生产环境使用 HTTPS。
+3. 后端实现 rate limiting。
+4. 服务端校验所有输入。
+5. 使用安全密码哈希（bcrypt、argon2）。
+6. 实现 CSRF 防护。
+7. 设置安全 cookie flags。
+8. 使用 Content Security Policy headers。
+9. 清理所有用户输入。
+10. 多次失败后实现账号锁定。
 
-## Common Issues and Solutions
+## 常见问题与解决方案
 
-### Issue: Token not persisting after refresh
+### 问题：刷新后 token 未持久化
 
 ```typescript
 // Solution: Initialize auth state on app mount
@@ -555,7 +555,7 @@ const authStore = useAuthStore()
 authStore.checkAuth() // Restore auth from localStorage
 ```
 
-### Issue: Redirect loop after login
+### 问题：登录后出现重定向循环
 
 ```typescript
 // Solution: Check router guard logic
@@ -577,7 +577,7 @@ router.beforeEach((to, from, next) => {
 })
 ```
 
-### Issue: Form not clearing after successful submission
+### 问题：提交成功后表单未清空
 
 ```typescript
 // Solution: Reset form data
@@ -601,7 +601,7 @@ async function handleLogin(): Promise<void> {
 }
 ```
 
-## Additional Resources
+## 其它资源
 
 - [Vue 3 Documentation](https://vuejs.org/)
 - [Vue Router Documentation](https://router.vuejs.org/)

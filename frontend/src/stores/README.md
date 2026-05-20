@@ -1,61 +1,61 @@
-# Pinia Stores Documentation
+# Pinia Stores 文档
 
-This directory contains all Pinia stores for the Sub2API frontend application.
+本目录包含 Sub2API 前端应用的所有 Pinia store。
 
-## Stores Overview
+## Store 概览
 
-### 1. Auth Store (`auth.ts`)
+### 1. Auth Store（`auth.ts`）
 
-Manages user authentication state, login/logout, and token persistence.
+管理用户认证状态、登录/退出登录和 token 持久化。
 
-**State:**
+**State：**
 
-- `user: User | null` - Current authenticated user
-- `token: string | null` - JWT authentication token
+- `user: User | null`：当前已认证用户。
+- `token: string | null`：JWT 认证 token。
 
-**Computed:**
+**Computed：**
 
-- `isAuthenticated: boolean` - Whether user is currently authenticated
+- `isAuthenticated: boolean`：用户当前是否已认证。
 
-**Actions:**
+**Actions：**
 
-- `login(credentials)` - Authenticate user with username/password
-- `register(userData)` - Register new user account
-- `logout()` - Clear authentication and logout
-- `checkAuth()` - Restore session from localStorage
-- `refreshUser()` - Fetch latest user data from server
+- `login(credentials)`：使用用户名/密码认证用户。
+- `register(userData)`：注册新用户账号。
+- `logout()`：清理认证状态并退出登录。
+- `checkAuth()`：从 `localStorage` 恢复会话。
+- `refreshUser()`：从服务端获取最新用户数据。
 
-### 2. App Store (`app.ts`)
+### 2. App Store（`app.ts`）
 
-Manages global UI state including sidebar, loading indicators, and toast notifications.
+管理全局 UI 状态，包括侧边栏、加载状态和 toast 通知。
 
-**State:**
+**State：**
 
-- `sidebarCollapsed: boolean` - Sidebar collapsed state
-- `loading: boolean` - Global loading state
-- `toasts: Toast[]` - Active toast notifications
+- `sidebarCollapsed: boolean`：侧边栏折叠状态。
+- `loading: boolean`：全局加载状态。
+- `toasts: Toast[]`：当前活跃的 toast 通知。
 
-**Computed:**
+**Computed：**
 
-- `hasActiveToasts: boolean` - Whether any toasts are active
+- `hasActiveToasts: boolean`：是否存在活跃 toast。
 
-**Actions:**
+**Actions：**
 
-- `toggleSidebar()` - Toggle sidebar state
-- `setSidebarCollapsed(collapsed)` - Set sidebar state explicitly
-- `setLoading(isLoading)` - Set loading state
-- `showToast(type, message, duration?)` - Show toast notification
-- `showSuccess(message, duration?)` - Show success toast
-- `showError(message, duration?)` - Show error toast
-- `showInfo(message, duration?)` - Show info toast
-- `showWarning(message, duration?)` - Show warning toast
-- `hideToast(id)` - Hide specific toast
-- `clearAllToasts()` - Clear all toasts
-- `withLoading(operation)` - Execute async operation with loading state
-- `withLoadingAndError(operation, errorMessage?)` - Execute with loading and error handling
-- `reset()` - Reset store to defaults
+- `toggleSidebar()`：切换侧边栏状态。
+- `setSidebarCollapsed(collapsed)`：显式设置侧边栏状态。
+- `setLoading(isLoading)`：设置加载状态。
+- `showToast(type, message, duration?)`：显示 toast 通知。
+- `showSuccess(message, duration?)`：显示成功 toast。
+- `showError(message, duration?)`：显示错误 toast。
+- `showInfo(message, duration?)`：显示信息 toast。
+- `showWarning(message, duration?)`：显示警告 toast。
+- `hideToast(id)`：隐藏指定 toast。
+- `clearAllToasts()`：清除所有 toast。
+- `withLoading(operation)`：在加载状态中执行异步操作。
+- `withLoadingAndError(operation, errorMessage?)`：执行带加载和错误处理的异步操作。
+- `reset()`：重置 store 到默认状态。
 
-## Usage Examples
+## 使用示例
 
 ### Auth Store
 
@@ -120,7 +120,7 @@ const toastId = appStore.showToast('info', 'Custom message', undefined) // No au
 appStore.hideToast(toastId)
 ```
 
-### Combined Usage in Vue Component
+### 在 Vue 组件中组合使用
 
 ```vue
 <script setup lang="ts">
@@ -169,24 +169,24 @@ async function handleLogout() {
 </template>
 ```
 
-## Persistence
+## 持久化
 
-- **Auth Store**: Token and user data are automatically persisted to `localStorage`
-  - Keys: `auth_token`, `auth_user`
-  - Restored on `checkAuth()` call
-- **App Store**: No persistence (UI state resets on page reload)
+- **Auth Store**：Token 和用户数据会自动持久化到 `localStorage`。
+- Keys：`auth_token`、`auth_user`。
+- 调用 `checkAuth()` 时恢复。
+- **App Store**：不做持久化，页面刷新后 UI 状态会重置。
 
-## TypeScript Support
+## TypeScript 支持
 
-All stores are fully typed with TypeScript. Import types from `@/types`:
+所有 store 都有完整 TypeScript 类型。从 `@/types` 导入类型：
 
 ```typescript
 import type { User, Toast, ToastType } from '@/types'
 ```
 
-## Testing
+## 测试
 
-Stores can be reset to initial state:
+Store 可以重置为初始状态：
 
 ```typescript
 // Auth store
