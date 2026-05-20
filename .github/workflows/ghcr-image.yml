@@ -3,7 +3,7 @@ name: GHCR Image
 on:
   push:
     branches:
-      - main
+      - 'release/**'
   workflow_dispatch:
 
 permissions:
@@ -22,14 +22,26 @@ jobs:
         id: build_meta
         shell: bash
         run: |
+          ref_name="${GITHUB_REF_NAME}"
+          if [[ "$ref_name" != release/* ]]; then
+            echo "This workflow builds production candidate images only from release/<version> branches." >&2
+            echo "Current ref: ${ref_name}" >&2
+            exit 1
+          fi
+
           owner_lower="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
           repo_lower="$(echo '${{ github.event.repository.name }}' | tr '[:upper:]' '[:lower:]')"
           short_sha="${GITHUB_SHA::7}"
           build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          version="${ref_name#release/}"
+          safe_version="$(echo "$version" | tr '[:upper:]/' '[:lower:]-' | sed -E 's/[^a-z0-9._-]+/-/g')"
+          candidate_tag="release-${safe_version}-${short_sha}"
 
           echo "image=ghcr.io/${owner_lower}/${repo_lower}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
           echo "build_date=${build_date}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "candidate_tag=${candidate_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -47,7 +59,7 @@ jobs:
         with:
           images: ${{ steps.build_meta.outputs.image }}
           tags: |
-            type=raw,value=main-${{ steps.build_meta.outputs.short_sha }}
+            type=raw,value=${{ steps.build_meta.outputs.candidate_tag }}
             type=sha,prefix=sha-
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
@@ -62,7 +74,7 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            VERSION=main-${{ steps.build_meta.outputs.short_sha }}
+            VERSION=${{ steps.build_meta.outputs.version }}
             COMMIT=${{ github.sha }}
             DATE=${{ steps.build_meta.outputs.build_date }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -75,13 +87,19 @@ jobs:
         run: |
           image="${{ steps.build_meta.outputs.image }}"
           digest="${{ steps.build.outputs.digest }}"
-          tag="main-${{ steps.build_meta.outputs.short_sha }}"
+          tag="${{ steps.build_meta.outputs.candidate_tag }}"
 
           {
-            echo "### GHCR image published"
+            echo "### GHCR candidate image published"
             echo
             echo "- Image: \`${image}:${tag}\`"
             echo "- Digest: \`${image}@${digest}\`"
             echo
-            echo "Use the digest form in production compose files."
+            echo "Use this immutable digest in the ops repository production compose file."
+            echo
+            echo "Next handoff:"
+            echo "1. Copy the digest into the version record."
+            echo "2. Update \`sub2api/deploy/docker-compose.yml\` on \`release/<version>\` to use this digest."
+            echo "3. Push the ops \`release/<version>\` branch."
+            echo "4. Start local Docker validation with the same source commit, ops compose commit, and digest."
           } >> "$GITHUB_STEP_SUMMARY"

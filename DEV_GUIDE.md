@@ -7,7 +7,7 @@
 | 项目 | 说明 |
 |------|------|
 | **上游仓库** | Wei-Shaw/sub2api |
-| **Fork 仓库** | bayma888/sub2api-bmai |
+| **Fork 仓库** | zeroliao/sub2api |
 | **技术栈** | Go 后端 (Ent ORM + Gin) + Vue3 前端 (pnpm) |
 | **数据库** | PostgreSQL 16 + Redis |
 | **包管理** | 后端: go modules, 前端: **pnpm**（不是 npm） |
@@ -49,7 +49,17 @@ npm install -g pnpm
 |----------|----------|----------|
 | **backend-ci.yml** | push, pull_request | 单元测试 + 集成测试 + golangci-lint v2.7 |
 | **security-scan.yml** | push, pull_request, 每周一 | govulncheck + gosec + pnpm audit |
-| **release.yml** | tag `v*` | 构建发布（PR 不触发） |
+| **ghcr-image.yml** | push `release/**`，或手动选择 `release/<version>` | 从 `release/<version>` 构建候选镜像并推送 GHCR，输出 immutable digest |
+| **release.yml** | tag `v*`，或手动指定 tag | GitHub Release 和二进制归档；不重新构建 Docker 镜像 |
+| **promote-image.yml** | 手动触发 | 将已验证的 `ghcr.io/...@sha256:<digest>` 提升为版本镜像 tag，不重新 build |
+
+### 版本发布原则
+
+- 生产候选镜像只能从 `release/<version>` 构建，不能把 `main` push 当作生产候选镜像入口。
+- 本地 Docker 验证、服务器验证和生产部署必须使用同一个 source release commit、ops compose commit 和 immutable image digest。
+- `release.yml` 归档发布不能替代已验证 digest；如需版本镜像 tag，使用 `promote-image.yml` 标记同一个 digest。
+- `backend/cmd/server/VERSION` 如需更新，必须作为版本内容提交到 `dev/<version>` / `release/<version>`；发布归档流程不会在部署后自动修改 `main`。
+- 完整版本流程以相邻运维仓库 `../sub2api/docs/version-management.md` 为准。
 
 ### CI 要求
 
@@ -264,16 +274,15 @@ psql -U sub2api -h 127.0.0.1 -d sub2api -f migration.sql
 ### Git 操作
 
 ```bash
-# 同步上游
+# 同步上游（必须纳入某个版本，不能直接进入 main）
 git fetch upstream
-git checkout main
+git checkout dev/<version>
 git merge upstream/main
-git push origin main
 
-# 创建功能分支
-git checkout -b feature/xxx
+# 创建版本开发分支
+git checkout -b dev/<version>
 
-# Rebase 到最新 main
+# Rebase 到最新 main（用于普通版本分支同步）
 git fetch upstream
 git rebase upstream/main
 ```
@@ -313,7 +322,7 @@ golangci-lint run ./...
 ## 六、项目结构速览
 
 ```
-sub2api-bmai/
+sub2api/
 ├── backend/
 │   ├── cmd/server/          # 主程序入口
 │   ├── ent/                 # Ent ORM 生成代码

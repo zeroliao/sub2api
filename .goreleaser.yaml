@@ -1,5 +1,9 @@
 version: 2
 
+# 历史/可选 GoReleaser 配置：包含 Docker 镜像构建与推送。
+# 当前默认 `.github/workflows/release.yml` 不使用本文件；生产候选镜像
+# 由 `.github/workflows/ghcr-image.yml` 从 `release/<version>` 构建，
+# 并通过 immutable digest 进入运维仓库 compose。
 project_name: sub2api
 
 before:

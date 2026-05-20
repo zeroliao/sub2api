@@ -167,15 +167,19 @@ C:\Users\Administrator\Desktop\code\sub2api-wrap\sub2api
 
 ```text
 git pull
-diff-server
+分配或确认版本号
+在运维仓库创建 dev/<version>
 修改 deploy/docker-compose.yml 或脚本
-本地检查
-git commit
-git push
+提交并同步到 release/<version>
+diff-server
+本地 Docker 验证或交给有 Docker 的电脑验证
+验证通过后标记版本状态为已提测
+validate-candidate
 backup
-deploy
+start-bluegreen-deploy 或 bluegreen-deploy
 healthcheck/logs
-失败 rollback
+成功后合入 main 并打 v<version> tag
+失败 rollback，保留 release/<version> 排查
 ```
 
 ## 修改源码功能
@@ -190,20 +194,36 @@ C:\Users\Administrator\Desktop\code\sub2api-wrap\sub2api-src
 
 ```text
 git pull
-创建 feature 分支
+分配或确认版本号
+创建 dev/<version>
 修改后端或前端代码
 运行相关测试
-构建 Docker 镜像
-推送镜像到镜像仓库
-回到运维仓库更新 image tag
+同步到 release/<version>
+推送 release/<version>，由 GitHub Actions 构建候选镜像
+等待 GHCR Image workflow 成功，并从 Summary 记录 immutable image digest
+回到运维仓库 release/<version> 更新 compose digest
+推送运维仓库 release/<version>
 diff-server
+本地 Docker 验证或交给有 Docker 的电脑验证
+验证通过后标记版本状态为已提测
+validate-candidate
 backup
-deploy
+start-bluegreen-deploy 或 bluegreen-deploy
 healthcheck/logs
-失败 rollback
+成功后合入 main 并打 v<version> tag
+如需要镜像版本 tag，运行 Promote Verified Image 标记已验证 digest
+失败 rollback，保留 release/<version> 排查
 ```
 
-源码仓库产出镜像，运维仓库发布镜像。
+源码仓库的 `release/<version>` 触发候选镜像构建，运维仓库使用同一个 digest 完成验证和部署。生产 compose 只使用 `ghcr.io/...@sha256:<digest>`，不要使用 `latest`、`main` 或 `dev` 等可变 tag。
+
+## 节点交接信号
+
+- GitHub 构建镜像完成后，完成信号是 `GHCR Image` workflow 成功，且 Summary 中出现 `ghcr.io/...@sha256:<digest>`。
+- 有 Docker 的电脑开始验证前，必须先拉取同一个 `sub2api-src/release/<version>` commit 和 `sub2api/release/<version>` compose commit。
+- 本地 Docker 验证完成后，把验证机器、source commit、ops commit、digest 和结果写入版本记录；没有记录不要进入服务器验证。
+- `validate-candidate` 成功后再执行 `backup`；`backup` 成功后再执行蓝绿部署。
+- 部署成功后再合入 `main`、打 `v<version>` tag、运行发布归档和可选的镜像 tag 提升。
 
 ## 多电脑协作规则
 

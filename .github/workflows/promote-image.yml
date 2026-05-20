@@ -1,0 +1,96 @@
+name: Promote Verified Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: 'Verified image digest, for example ghcr.io/owner/sub2api@sha256:...'
+        required: true
+        type: string
+      version:
+        description: 'Version to promote, for example 001 or v001'
+        required: true
+        type: string
+      add_latest:
+        description: 'Also update latest tag for convenience only; production still uses digest'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    name: Promote verified digest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        id: meta
+        shell: bash
+        run: |
+          image_digest="${{ github.event.inputs.image_digest }}"
+          version="${{ github.event.inputs.version }}"
+          version="${version#v}"
+
+          expected_image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          if [[ "$image_digest" != "${expected_image}"@sha256:* ]]; then
+            echo "image_digest must start with ${expected_image}@sha256:" >&2
+            exit 1
+          fi
+
+          if [[ ! "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "version contains unsupported characters: ${version}" >&2
+            exit 1
+          fi
+
+          echo "image_digest=${image_digest}" >> "$GITHUB_OUTPUT"
+          echo "image=${expected_image}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote digest to version tags
+        shell: bash
+        run: |
+          image="${{ steps.meta.outputs.image }}"
+          image_digest="${{ steps.meta.outputs.image_digest }}"
+          version="${{ steps.meta.outputs.version }}"
+
+          docker buildx imagetools create \
+            --tag "${image}:v${version}" \
+            --tag "${image}:${version}" \
+            "${image_digest}"
+
+          if [[ "${{ github.event.inputs.add_latest }}" == "true" ]]; then
+            docker buildx imagetools create \
+              --tag "${image}:latest" \
+              "${image_digest}"
+          fi
+
+      - name: Summary
+        shell: bash
+        run: |
+          image="${{ steps.meta.outputs.image }}"
+          version="${{ steps.meta.outputs.version }}"
+          image_digest="${{ steps.meta.outputs.image_digest }}"
+
+          {
+            echo "### Verified image promoted"
+            echo
+            echo "- Source digest: \`${image_digest}\`"
+            echo "- Version tags: \`${image}:v${version}\`, \`${image}:${version}\`"
+            if [[ "${{ github.event.inputs.add_latest }}" == "true" ]]; then
+              echo "- Latest tag: \`${image}:latest\`"
+              echo
+              echo "Latest is only a convenience tag. Production compose must continue to use the verified digest."
+            fi
+            echo
+            echo "This workflow tags an already verified digest and does not rebuild the image."
+          } >> "$GITHUB_STEP_SUMMARY"

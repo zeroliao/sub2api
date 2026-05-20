@@ -1,4 +1,7 @@
-# 简化版 GoReleaser 配置 - 仅发布 x86_64 GHCR 镜像
+# 历史/可选 GoReleaser 配置 - 仅发布 x86_64 GHCR 镜像。
+# 当前默认 `.github/workflows/release.yml` 不使用本文件；生产候选镜像
+# 由 `.github/workflows/ghcr-image.yml` 从 `release/<version>` 构建，
+# 并通过 immutable digest 进入运维仓库 compose。
 version: 2
 
 project_name: sub2api
