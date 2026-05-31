@@ -70,7 +70,14 @@ type AccountTestService struct {
 	antigravityGatewayService *AntigravityGatewayService
 	httpUpstream              HTTPUpstream
 	cfg                       *config.Config
+	settingService            *SettingService
+	proxyHealthReporter       AccountProxyHealthReporter
 	tlsFPProfileService       *TLSFingerprintProfileService
+}
+
+type AccountProxyHealthReporter interface {
+	ReportAccountProxyFailure(ctx context.Context, accountID int64, reason string) (*ProxyRelationship, error)
+	RecordAccountProxySuccess(ctx context.Context, accountID int64) error
 }
 
 // NewAccountTestService creates a new AccountTestService
@@ -81,6 +88,8 @@ func NewAccountTestService(
 	antigravityGatewayService *AntigravityGatewayService,
 	httpUpstream HTTPUpstream,
 	cfg *config.Config,
+	settingService *SettingService,
+	proxyHealthReporter AccountProxyHealthReporter,
 	tlsFPProfileService *TLSFingerprintProfileService,
 ) *AccountTestService {
 	return &AccountTestService{
@@ -90,6 +99,8 @@ func NewAccountTestService(
 		antigravityGatewayService: antigravityGatewayService,
 		httpUpstream:              httpUpstream,
 		cfg:                       cfg,
+		settingService:            settingService,
+		proxyHealthReporter:       proxyHealthReporter,
 		tlsFPProfileService:       tlsFPProfileService,
 	}
 }
@@ -103,6 +114,89 @@ func (s *AccountTestService) resolveTLSProfile(account *Account) *tlsfingerprint
 
 func (s *AccountTestService) resolveOpenAITLSProfile(account *Account) *tlsfingerprint.Profile {
 	return ensureOpenAIOAuthTLSProfile(account, s.resolveTLSProfile(account))
+}
+
+func (s *AccountTestService) doOpenAIAccountTestWithProxyFallback(req *http.Request, proxyURL string, account *Account, profile *tlsfingerprint.Profile) (*http.Response, error) {
+	if account == nil {
+		return s.httpUpstream.DoWithTLS(req, proxyURL, 0, 0, profile)
+	}
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, profile)
+	if err == nil {
+		if strings.TrimSpace(proxyURL) != "" && s.proxyHealthReporter != nil {
+			_ = s.proxyHealthReporter.RecordAccountProxySuccess(req.Context(), account.ID)
+		}
+		return resp, err
+	}
+	if strings.TrimSpace(proxyURL) == "" || !isProxyConnectivityError(err) {
+		return resp, err
+	}
+	if s.proxyHealthReporter != nil {
+		rel, reportErr := s.proxyHealthReporter.ReportAccountProxyFailure(req.Context(), account.ID, err.Error())
+		if reportErr == nil && rel != nil && rel.CurrentProxy != nil {
+			nextProxyURL := rel.CurrentProxy.URL()
+			if nextProxyURL != "" && nextProxyURL != proxyURL {
+				if retryReq, ok := cloneAccountTestRequest(req); ok {
+					log.Printf("[AccountTest] OpenAI proxy test failed for account %d, retrying with reassigned proxy %d: %v", account.ID, rel.CurrentProxy.ID, err)
+					resp, retryErr := s.httpUpstream.DoWithTLS(retryReq, nextProxyURL, account.ID, account.Concurrency, profile)
+					if retryErr == nil {
+						_ = s.proxyHealthReporter.RecordAccountProxySuccess(req.Context(), account.ID)
+					}
+					return resp, retryErr
+				}
+			}
+		}
+	}
+	if !s.shouldRetryOpenAIAccountTestDirect(req.Context()) {
+		return nil, err
+	}
+	retryReq, ok := cloneAccountTestRequest(req)
+	if !ok {
+		return nil, err
+	}
+	log.Printf("[AccountTest] OpenAI proxy test failed for account %d, retrying direct because direct_fallback_mode=global: %v", account.ID, err)
+	return s.httpUpstream.DoWithTLS(retryReq, "", account.ID, account.Concurrency, profile)
+}
+
+func cloneAccountTestRequest(req *http.Request) (*http.Request, bool) {
+	retryReq := req.Clone(req.Context())
+	retryReq.Host = req.Host
+	if req.GetBody != nil {
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, false
+		}
+		retryReq.Body = body
+		retryReq.GetBody = req.GetBody
+		return retryReq, true
+	}
+	return retryReq, req.Body == nil || req.Body == http.NoBody
+}
+
+func (s *AccountTestService) shouldRetryOpenAIAccountTestDirect(ctx context.Context) bool {
+	return runtimeDirectFallbackMode(ctx, s.settingService) == DirectFallbackGlobal
+}
+
+func isProxyConnectivityError(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"first record does not look like a tls handshake",
+		"server gave http response to https client",
+		"tls handshake failed",
+		"connect to proxy",
+		"proxy connect",
+		"socks5 connect",
+		"connection refused",
+		"connection reset",
+		"i/o timeout",
+		"context deadline exceeded",
+		"no route to host",
+		"network is unreachable",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *AccountTestService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -619,7 +713,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.resolveOpenAITLSProfile(account))
+	resp, err := s.doOpenAIAccountTestWithProxyFallback(req, proxyURL, account, s.resolveOpenAITLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -727,7 +821,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	if isOAuth {
 		tlsProfile = s.resolveOpenAITLSProfile(account)
 	}
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+	resp, err := s.doOpenAIAccountTestWithProxyFallback(req, proxyURL, account, tlsProfile)
 	if err != nil {
 		if s.accountRepo != nil {
 			updates := buildOpenAICompactProbeExtraUpdates(nil, nil, err, time.Now())
@@ -1482,7 +1576,7 @@ func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Co
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.resolveOpenAITLSProfile(account))
+	resp, err := s.doOpenAIAccountTestWithProxyFallback(req, proxyURL, account, s.resolveOpenAITLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Responses API request failed: %s", err.Error()))
 	}

@@ -112,6 +112,8 @@ type AdminService interface {
 	ListProxyRelationships(ctx context.Context, page, pageSize int, platform, status, search string) ([]ProxyRelationship, int64, error)
 	ReassignAccountProxy(ctx context.Context, accountID int64) (*ProxyRelationship, error)
 	RestoreAccountProxyHistory(ctx context.Context, accountID int64) (*ProxyRelationship, error)
+	ReportAccountProxyFailure(ctx context.Context, accountID int64, reason string) (*ProxyRelationship, error)
+	RecordAccountProxySuccess(ctx context.Context, accountID int64) error
 	GetAccountProxyHistory(ctx context.Context, accountID int64) ([]AccountProxyBinding, error)
 	GetProxyDispatchSettings(ctx context.Context) (*ProxyDispatchSettings, error)
 	UpdateProxyDispatchSettings(ctx context.Context, input *ProxyDispatchSettings) (*ProxyDispatchSettings, error)
@@ -430,19 +432,21 @@ type UpdateProxyInput struct {
 }
 
 type AccountProxyBinding struct {
-	ID            int64      `json:"id"`
-	IdentityKey   string     `json:"identity_key"`
-	Platform      string     `json:"platform"`
-	AccountID     *int64     `json:"account_id,omitempty"`
-	ProxyID       int64      `json:"proxy_id"`
-	Status        string     `json:"status"`
-	Source        string     `json:"source"`
-	FirstUsedAt   time.Time  `json:"first_used_at"`
-	LastUsedAt    time.Time  `json:"last_used_at"`
-	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
-	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
-	UseCount      int64      `json:"use_count"`
-	Proxy         *Proxy     `json:"proxy,omitempty"`
+	ID                int64      `json:"id"`
+	IdentityKey       string     `json:"identity_key"`
+	Platform          string     `json:"platform"`
+	AccountID         *int64     `json:"account_id,omitempty"`
+	ProxyID           int64      `json:"proxy_id"`
+	Status            string     `json:"status"`
+	Source            string     `json:"source"`
+	FirstUsedAt       time.Time  `json:"first_used_at"`
+	LastUsedAt        time.Time  `json:"last_used_at"`
+	LastSuccessAt     *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt     *time.Time `json:"last_failure_at,omitempty"`
+	FailureCount      int        `json:"failure_count,omitempty"`
+	LastFailureReason string     `json:"last_failure_reason,omitempty"`
+	UseCount          int64      `json:"use_count"`
+	Proxy             *Proxy     `json:"proxy,omitempty"`
 }
 
 type ProxyRelationship struct {
@@ -659,10 +663,11 @@ var proxyQualityTargets = []proxyQualityTarget{
 }
 
 const (
-	proxyQualityRequestTimeout        = 15 * time.Second
-	proxyQualityResponseHeaderTimeout = 10 * time.Second
-	proxyQualityMaxBodyBytes          = int64(8 * 1024)
-	proxyQualityClientUserAgent       = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+	accountProxyFailureReassignThreshold = 2
+	proxyQualityRequestTimeout           = 15 * time.Second
+	proxyQualityResponseHeaderTimeout    = 10 * time.Second
+	proxyQualityMaxBodyBytes             = int64(8 * 1024)
+	proxyQualityClientUserAgent          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
 )
 
 var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_STATUS_UNAVAILABLE", "RPM cache not available")
@@ -3250,6 +3255,146 @@ func (s *adminServiceImpl) RestoreAccountProxyHistory(ctx context.Context, accou
 	return s.proxyRelationshipForAccount(ctx, account)
 }
 
+func (s *adminServiceImpl) ReportAccountProxyFailure(ctx context.Context, accountID int64, reason string) (*ProxyRelationship, error) {
+	if s == nil || s.entClient == nil || s.accountRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if account.ProxyID == nil || *account.ProxyID <= 0 {
+		return s.proxyRelationshipForAccount(ctx, account)
+	}
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return s.proxyRelationshipForAccount(ctx, account)
+	}
+	currentProxyID := *account.ProxyID
+	reason = truncateProxyFailureReason(reason)
+
+	var failureCount int
+	rows, err := s.entClient.QueryContext(ctx, `
+INSERT INTO account_proxy_bindings (identity_key, platform, account_id, proxy_id, status, source, first_used_at, last_used_at, last_failure_at, failure_count, last_failure_reason, use_count, created_at, updated_at)
+VALUES ($1, $2, $3, $4, 'active', 'auto', NOW(), NOW(), NOW(), 1, NULLIF($5, ''), 1, NOW(), NOW())
+ON CONFLICT (identity_key, proxy_id)
+DO UPDATE SET account_id = EXCLUDED.account_id,
+              platform = EXCLUDED.platform,
+              last_used_at = NOW(),
+              last_failure_at = NOW(),
+              failure_count = account_proxy_bindings.failure_count + 1,
+              last_failure_reason = EXCLUDED.last_failure_reason,
+              updated_at = NOW()
+RETURNING failure_count`, identityKey, account.Platform, account.ID, currentProxyID, reason)
+	if err != nil {
+		return nil, err
+	}
+	if rows.Next() {
+		if err := rows.Scan(&failureCount); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	_, _ = s.entClient.ExecContext(ctx, `
+UPDATE proxies
+SET failure_count = COALESCE(failure_count, 0) + 1,
+    last_checked_at = NOW(),
+    quality_status = CASE
+      WHEN COALESCE(failure_count, 0) + 1 >= $2 THEN 'cooling'
+      ELSE quality_status
+    END
+WHERE id = $1`, currentProxyID, accountProxyFailureReassignThreshold)
+
+	if failureCount < accountProxyFailureReassignThreshold {
+		return s.proxyRelationshipForAccount(ctx, account)
+	}
+
+	_, err = s.entClient.ExecContext(ctx, `
+UPDATE account_proxy_bindings
+SET status = 'proxy_unavailable',
+    last_failure_at = NOW(),
+    last_failure_reason = NULLIF($3, ''),
+    updated_at = NOW()
+WHERE identity_key = $1 AND proxy_id = $2`, identityKey, currentProxyID, reason)
+	if err != nil {
+		return nil, err
+	}
+
+	if proxy, err := s.chooseReplacementProxy(ctx, identityKey, currentProxyID); err == nil {
+		account.ProxyID = &proxy.ID
+		account.Proxy = proxy
+		if updateErr := s.accountRepo.Update(ctx, account); updateErr != nil {
+			return nil, updateErr
+		}
+		if updateErr := s.recordAccountProxyBinding(ctx, account, proxy.ID, ProxyBindingSourceAuto, ProxyBindingStatusActive); updateErr != nil {
+			return nil, updateErr
+		}
+		rel, relErr := s.proxyRelationshipForAccount(ctx, account)
+		if rel != nil {
+			rel.LastSwitchReason = "previous proxy failed repeatedly"
+			rel.LastFailureReason = reason
+		}
+		return rel, relErr
+	}
+
+	if runtimeDirectFallbackMode(ctx, s.settingService) == DirectFallbackGlobal {
+		account.ProxyID = nil
+		account.Proxy = nil
+		if updateErr := s.accountRepo.Update(ctx, account); updateErr != nil {
+			return nil, updateErr
+		}
+		rel, relErr := s.proxyRelationshipForAccount(ctx, account)
+		if rel != nil {
+			rel.LastSwitchReason = "all proxies unavailable; using direct fallback"
+			rel.LastFailureReason = reason
+			rel.DirectFallbackMode = DirectFallbackGlobal
+		}
+		return rel, relErr
+	}
+
+	rel, relErr := s.proxyRelationshipForAccount(ctx, account)
+	if rel != nil {
+		rel.LastFailureReason = reason
+		rel.NoAvailableProxy = true
+	}
+	return rel, relErr
+}
+
+func (s *adminServiceImpl) RecordAccountProxySuccess(ctx context.Context, accountID int64) error {
+	if s == nil || s.entClient == nil || s.accountRepo == nil {
+		return nil
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil || account == nil || account.ProxyID == nil || *account.ProxyID <= 0 {
+		return nil
+	}
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return nil
+	}
+	_, err = s.entClient.ExecContext(ctx, `
+UPDATE account_proxy_bindings
+SET status = 'active',
+    last_success_at = NOW(),
+    failure_count = 0,
+    last_failure_reason = NULL,
+    updated_at = NOW()
+WHERE identity_key = $1 AND proxy_id = $2`, identityKey, *account.ProxyID)
+	if err != nil {
+		return err
+	}
+	_, _ = s.entClient.ExecContext(ctx, `
+UPDATE proxies
+SET failure_count = 0,
+    quality_status = CASE WHEN quality_status = 'cooling' THEN 'healthy' ELSE quality_status END,
+    last_checked_at = NOW()
+WHERE id = $1`, *account.ProxyID)
+	return nil
+}
+
 func (s *adminServiceImpl) GetAccountProxyHistory(ctx context.Context, accountID int64) ([]AccountProxyBinding, error) {
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
@@ -4173,6 +4318,73 @@ LIMIT 1`)
 	return nil, infraerrors.ServiceUnavailable("NO_AVAILABLE_PROXY", "no available proxy")
 }
 
+func (s *adminServiceImpl) chooseReplacementProxy(ctx context.Context, identityKey string, currentProxyID int64) (*Proxy, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT p.id, p.name, p.protocol, p.host, p.port, COALESCE(p.username, ''), COALESCE(p.password, ''),
+       p.status, p.created_at, p.updated_at,
+       COALESCE(p.source, 'manual'), COALESCE(p.proxy_type, 'datacenter'), COALESCE(p.provider, ''),
+       COALESCE(p.region, ''), COALESCE(p.exit_ip, ''), COALESCE(p.quality_status, 'healthy'),
+       p.max_bound_accounts, p.max_active_accounts, COALESCE(p.weight, 100), p.last_checked_at,
+       COALESCE(p.failure_count, 0),
+       COALESCE(bound.bound_count, 0), COALESCE(active.active_count, 0), COALESCE(active.current_concurrency, 0)
+FROM proxies p
+LEFT JOIN (
+  SELECT proxy_id, COUNT(DISTINCT identity_key) AS bound_count
+  FROM account_proxy_bindings
+  WHERE status = 'active'
+  GROUP BY proxy_id
+) bound ON bound.proxy_id = p.id
+LEFT JOIN (
+  SELECT proxy_id, COUNT(*) AS active_count, COALESCE(SUM(concurrency), 0) AS current_concurrency
+  FROM accounts
+  WHERE deleted_at IS NULL AND status = 'active' AND proxy_id IS NOT NULL
+  GROUP BY proxy_id
+) active ON active.proxy_id = p.id
+WHERE p.deleted_at IS NULL
+  AND p.id <> $2
+  AND p.status = 'active'
+  AND COALESCE(p.quality_status, 'healthy') NOT IN ('failed', 'cooling')
+  AND NOT EXISTS (
+    SELECT 1 FROM account_proxy_bindings b
+    WHERE b.identity_key = $1
+      AND b.proxy_id = p.id
+      AND b.status = 'proxy_unavailable'
+  )
+  AND (p.max_bound_accounts IS NULL OR COALESCE(bound.bound_count, 0) < p.max_bound_accounts)
+  AND (p.max_active_accounts IS NULL OR COALESCE(active.active_count, 0) < p.max_active_accounts)
+ORDER BY COALESCE(active.active_count, 0) ASC,
+         COALESCE(bound.bound_count, 0) ASC,
+         COALESCE(active.current_concurrency, 0) ASC,
+         COALESCE(p.failure_count, 0) ASC,
+         COALESCE(p.weight, 100) DESC,
+         p.id ASC
+LIMIT 1`, identityKey, currentProxyID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var p Proxy
+		var bound, active, concurrency int64
+		if err := rows.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.Source, &p.ProxyType, &p.Provider, &p.Region, &p.ExitIP, &p.QualityStatus, &p.MaxBoundAccounts, &p.MaxActiveAccounts, &p.Weight, &p.LastCheckedAt, &p.FailureCount, &bound, &active, &concurrency); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, infraerrors.ServiceUnavailable("NO_AVAILABLE_PROXY", "no available proxy")
+}
+
+func truncateProxyFailureReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if len(reason) <= 500 {
+		return reason
+	}
+	return reason[:500]
+}
+
 func (s *adminServiceImpl) recordAccountProxyBinding(ctx context.Context, account *Account, proxyID int64, source, status string) error {
 	identityKey := accountProxyIdentityKey(account)
 	if identityKey == "" || proxyID <= 0 {
@@ -4223,6 +4435,7 @@ func (s *adminServiceImpl) listProxyBindingsByIdentity(ctx context.Context, iden
 	rows, err := s.entClient.QueryContext(ctx, `
 SELECT b.id, b.identity_key, b.platform, b.account_id, b.proxy_id, b.status, b.source,
        b.first_used_at, b.last_used_at, b.last_success_at, b.last_failure_at, b.use_count,
+       COALESCE(b.failure_count, 0), COALESCE(b.last_failure_reason, ''),
        p.name, p.protocol, p.host, p.port, COALESCE(p.username, ''), COALESCE(p.password, ''), p.status, p.created_at, p.updated_at
 FROM account_proxy_bindings b
 JOIN proxies p ON p.id = b.proxy_id
@@ -4236,7 +4449,7 @@ ORDER BY b.last_used_at DESC, b.id DESC`, identityKey)
 	for rows.Next() {
 		var b AccountProxyBinding
 		var p Proxy
-		if err := rows.Scan(&b.ID, &b.IdentityKey, &b.Platform, &b.AccountID, &b.ProxyID, &b.Status, &b.Source, &b.FirstUsedAt, &b.LastUsedAt, &b.LastSuccessAt, &b.LastFailureAt, &b.UseCount, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.IdentityKey, &b.Platform, &b.AccountID, &b.ProxyID, &b.Status, &b.Source, &b.FirstUsedAt, &b.LastUsedAt, &b.LastSuccessAt, &b.LastFailureAt, &b.UseCount, &b.FailureCount, &b.LastFailureReason, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, err
 		}
 		p.ID = b.ProxyID
@@ -4268,7 +4481,7 @@ func (s *adminServiceImpl) proxyRelationshipForAccount(ctx context.Context, acco
 		rel.CurrentProxy = proxy
 	}
 	rows, err := s.entClient.QueryContext(ctx, `
-SELECT b.id, b.status, b.source, b.last_used_at,
+SELECT b.id, b.status, b.source, b.last_used_at, COALESCE(b.last_failure_reason, ''),
        (SELECT COUNT(DISTINCT proxy_id) FROM account_proxy_bindings WHERE identity_key = $1) AS history_count,
        (SELECT COUNT(DISTINCT identity_key) FROM account_proxy_bindings WHERE proxy_id = $2 AND status = 'active') AS bound_count,
        (SELECT COUNT(*) FROM accounts WHERE proxy_id = $2 AND deleted_at IS NULL AND status = 'active') AS active_count,
@@ -4284,7 +4497,7 @@ LIMIT 1`, identityKey, *account.ProxyID)
 	if rows.Next() {
 		var bindingID int64
 		var lastUsed time.Time
-		if err := rows.Scan(&bindingID, &rel.BindingStatus, &rel.ProxySource, &lastUsed, &rel.HistoryProxyCount, &rel.BoundAccountCount, &rel.ActiveAccountCount, &rel.CurrentConcurrency); err != nil {
+		if err := rows.Scan(&bindingID, &rel.BindingStatus, &rel.ProxySource, &lastUsed, &rel.LastFailureReason, &rel.HistoryProxyCount, &rel.BoundAccountCount, &rel.ActiveAccountCount, &rel.CurrentConcurrency); err != nil {
 			return nil, err
 		}
 		rel.BindingID = &bindingID

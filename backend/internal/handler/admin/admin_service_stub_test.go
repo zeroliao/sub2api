@@ -601,6 +601,14 @@ func (s *stubAdminService) RestoreAccountProxyHistory(ctx context.Context, accou
 	return &service.ProxyRelationship{AccountID: accountID}, nil
 }
 
+func (s *stubAdminService) ReportAccountProxyFailure(ctx context.Context, accountID int64, reason string) (*service.ProxyRelationship, error) {
+	return &service.ProxyRelationship{AccountID: accountID, LastFailureReason: reason}, nil
+}
+
+func (s *stubAdminService) RecordAccountProxySuccess(ctx context.Context, accountID int64) error {
+	return nil
+}
+
 func (s *stubAdminService) GetAccountProxyHistory(ctx context.Context, accountID int64) ([]service.AccountProxyBinding, error) {
 	return nil, nil
 }
