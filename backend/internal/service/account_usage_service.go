@@ -600,6 +600,10 @@ func (s *AccountUsageService) resolveTLSProfile(account *Account) *tlsfingerprin
 	return s.tlsFPProfileService.ResolveTLSProfile(account)
 }
 
+func (s *AccountUsageService) resolveOpenAITLSProfile(account *Account) *tlsfingerprint.Profile {
+	return ensureOpenAIOAuthTLSProfile(account, s.resolveTLSProfile(account))
+}
+
 func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, account *Account) (map[string]any, error) {
 	if account == nil || !account.IsOAuth() {
 		return nil, nil
@@ -644,7 +648,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 	}
 	var resp *http.Response
 	if s.httpUpstream != nil {
-		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.resolveTLSProfile(account))
+		resp, err = s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, s.resolveOpenAITLSProfile(account))
 	} else {
 		client, clientErr := httppool.GetClient(httppool.Options{
 			ProxyURL:              proxyURL,

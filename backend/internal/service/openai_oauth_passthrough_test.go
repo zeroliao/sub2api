@@ -23,11 +23,12 @@ import (
 func f64p(v float64) *float64 { return &v }
 
 type httpUpstreamRecorder struct {
-	lastReq  *http.Request
-	lastBody []byte
-	requests []*http.Request
-	bodies   [][]byte
-	usedTLS  bool
+	lastReq        *http.Request
+	lastBody       []byte
+	requests       []*http.Request
+	bodies         [][]byte
+	usedTLS        bool
+	usedTLSProfile bool
 
 	resp      *http.Response
 	responses []*http.Response
@@ -57,6 +58,7 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 
 func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	u.usedTLS = true
+	u.usedTLSProfile = profile != nil
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 

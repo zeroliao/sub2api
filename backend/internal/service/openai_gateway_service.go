@@ -1116,6 +1116,10 @@ func (s *OpenAIGatewayService) resolveTLSProfile(account *Account) *tlsfingerpri
 	return s.tlsFPProfileService.ResolveTLSProfile(account)
 }
 
+func (s *OpenAIGatewayService) resolveOpenAITLSProfile(account *Account) *tlsfingerprint.Profile {
+	return ensureOpenAIOAuthTLSProfile(account, s.resolveTLSProfile(account))
+}
+
 func isOpenAITransientProcessingError(upstreamStatusCode int, upstreamMsg string, upstreamBody []byte) bool {
 	if upstreamStatusCode != http.StatusBadRequest {
 		return false
@@ -2726,7 +2730,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			proxyURL,
 			account.ID,
 			account.Concurrency,
-			s.resolveTLSProfile(account),
+			s.resolveOpenAITLSProfile(account),
 		)
 		SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 		if err != nil {
@@ -3034,7 +3038,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		proxyURL,
 		account.ID,
 		account.Concurrency,
-		s.resolveTLSProfile(account),
+		s.resolveOpenAITLSProfile(account),
 	)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {

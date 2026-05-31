@@ -998,7 +998,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		proxyURL,
 		account.ID,
 		account.Concurrency,
-		s.resolveTLSProfile(account),
+		s.resolveOpenAITLSProfile(account),
 	)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
