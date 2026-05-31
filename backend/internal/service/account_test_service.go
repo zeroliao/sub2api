@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -136,7 +137,7 @@ func (s *AccountTestService) doOpenAIAccountTestWithProxyFallback(req *http.Requ
 			nextProxyURL := rel.CurrentProxy.URL()
 			if nextProxyURL != "" && nextProxyURL != proxyURL {
 				if retryReq, ok := cloneAccountTestRequest(req); ok {
-					log.Printf("[AccountTest] OpenAI proxy test failed for account %d, retrying with reassigned proxy %d: %v", account.ID, rel.CurrentProxy.ID, err)
+					slog.Warn("openai_account_test_proxy_retry_reassigned", "account_id", account.ID, "proxy_id", rel.CurrentProxy.ID, "cause", err.Error())
 					resp, retryErr := s.httpUpstream.DoWithTLS(retryReq, nextProxyURL, account.ID, account.Concurrency, profile)
 					if retryErr == nil {
 						_ = s.proxyHealthReporter.RecordAccountProxySuccess(req.Context(), account.ID)
@@ -153,7 +154,7 @@ func (s *AccountTestService) doOpenAIAccountTestWithProxyFallback(req *http.Requ
 	if !ok {
 		return nil, err
 	}
-	log.Printf("[AccountTest] OpenAI proxy test failed for account %d, retrying direct because direct_fallback_mode=global: %v", account.ID, err)
+	slog.Warn("openai_account_test_proxy_retry_direct", "account_id", account.ID, "cause", err.Error(), "direct_fallback_mode", DirectFallbackGlobal)
 	return s.httpUpstream.DoWithTLS(retryReq, "", account.ID, account.Concurrency, profile)
 }
 
