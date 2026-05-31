@@ -162,7 +162,13 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if err != nil {
 		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorOpenAI)
 	}
-	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
+	resp, err := s.httpUpstream.DoWithTLS(
+		upstreamReq,
+		proxyURL,
+		account.ID,
+		account.Concurrency,
+		s.resolveTLSProfile(account),
+	)
 	if err != nil {
 		safeErr := sanitizeUpstreamErrorMessage(err.Error())
 		setOpsUpstreamError(c, 0, safeErr, "")
