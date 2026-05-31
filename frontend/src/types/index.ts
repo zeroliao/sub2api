@@ -688,6 +688,15 @@ export interface Proxy {
   username: string | null
   password?: string | null
   status: 'active' | 'inactive'
+  source?: string
+  proxy_type?: string
+  provider?: string
+  exit_ip?: string
+  max_bound_accounts?: number | null
+  max_active_accounts?: number | null
+  weight?: number
+  last_checked_at?: string | null
+  failure_count?: number
   account_count?: number // Number of accounts using this proxy
   latency_ms?: number
   latency_status?: 'success' | 'failed'
@@ -697,11 +706,101 @@ export interface Proxy {
   country_code?: string
   region?: string
   city?: string
-  quality_status?: 'healthy' | 'warn' | 'challenge' | 'failed'
+  quality_status?: 'healthy' | 'degraded' | 'failed' | 'cooling' | 'warn' | 'challenge'
   quality_score?: number
   quality_grade?: string
   quality_summary?: string
   quality_checked?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface AccountProxyBinding {
+  id: number
+  identity_key: string
+  platform: AccountPlatform | string
+  account_id?: number | null
+  proxy_id: number
+  status: 'active' | 'inactive' | 'account_deleted' | 'proxy_unavailable'
+  source: 'manual' | 'auto' | 'restored'
+  first_used_at: string
+  last_used_at: string
+  last_success_at?: string | null
+  last_failure_at?: string | null
+  use_count: number
+  proxy?: Proxy
+}
+
+export interface ProxyRelationship {
+  account_id: number
+  account_name: string
+  platform: AccountPlatform | string
+  account_type: AccountType | string
+  account_status: string
+  identity_key: string
+  current_proxy?: Proxy | null
+  proxy_source: 'manual' | 'auto' | 'restored' | string
+  binding_status: string
+  binding_id?: number | null
+  last_used_at?: string | null
+  history_proxy_count: number
+  bound_account_count: number
+  active_account_count: number
+  current_concurrency: number
+  last_switch_reason?: string
+  last_failure_reason?: string
+  direct_fallback_mode: 'off' | 'manual_only' | 'global'
+  no_available_proxy: boolean
+}
+
+export interface ProxyDispatchSettings {
+  direct_fallback_mode: 'off' | 'manual_only' | 'global'
+  auto_assign_enabled: boolean
+}
+
+export interface ProxyImportPreviewItem {
+  key: string
+  name: string
+  protocol: string
+  host: string
+  port: number
+  username?: string
+  password?: string
+  source: string
+  proxy_type: string
+  provider?: string
+  region?: string
+  quality_status: string
+  sidecar_required: boolean
+  sidecar_hint?: string
+  duplicate: boolean
+  valid: boolean
+  error?: string
+  selected: boolean
+  raw?: string
+}
+
+export interface ProxyImportPreview {
+  items: ProxyImportPreviewItem[]
+  total: number
+  valid: number
+  duplicates: number
+  sidecar_only: number
+  recommended: number
+  source_detected: string
+}
+
+export interface ProxySubscriptionSource {
+  id: number
+  name: string
+  url: string
+  source_type: string
+  provider?: string
+  sync_enabled: boolean
+  sync_interval_minutes: number
+  last_synced_at?: string | null
+  last_error?: string
+  status: string
   created_at: string
   updated_at: string
 }
@@ -1043,6 +1142,15 @@ export interface CreateProxyRequest {
   port: number
   username?: string | null
   password?: string | null
+  source?: string
+  proxy_type?: string
+  provider?: string
+  region?: string
+  exit_ip?: string
+  quality_status?: string
+  max_bound_accounts?: number | null
+  max_active_accounts?: number | null
+  weight?: number
 }
 
 export interface UpdateProxyRequest {
@@ -1053,6 +1161,15 @@ export interface UpdateProxyRequest {
   username?: string | null
   password?: string | null
   status?: 'active' | 'inactive'
+  source?: string
+  proxy_type?: string
+  provider?: string
+  region?: string
+  exit_ip?: string
+  quality_status?: string
+  max_bound_accounts?: number | null
+  max_active_accounts?: number | null
+  weight?: number
 }
 
 export interface AdminDataPayload {

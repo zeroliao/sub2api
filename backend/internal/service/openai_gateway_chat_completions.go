@@ -218,9 +218,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// 7. Send request
-	proxyURL := ""
-	if account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveRuntimeProxyURL(ctx, account, s.settingService)
+	if err != nil {
+		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorOpenAI)
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {

@@ -262,16 +262,27 @@ type AccountGroup struct {
 }
 
 type Proxy struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Protocol  string    `json:"protocol"`
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Username  string    `json:"username"`
-	Password  string    `json:"-"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                int64      `json:"id"`
+	Name              string     `json:"name"`
+	Protocol          string     `json:"protocol"`
+	Host              string     `json:"host"`
+	Port              int        `json:"port"`
+	Username          string     `json:"username"`
+	Password          string     `json:"-"`
+	Status            string     `json:"status"`
+	Source            string     `json:"source,omitempty"`
+	ProxyType         string     `json:"proxy_type,omitempty"`
+	Provider          string     `json:"provider,omitempty"`
+	Region            string     `json:"region,omitempty"`
+	ExitIP            string     `json:"exit_ip,omitempty"`
+	QualityStatus     string     `json:"quality_status,omitempty"`
+	MaxBoundAccounts  *int       `json:"max_bound_accounts,omitempty"`
+	MaxActiveAccounts *int       `json:"max_active_accounts,omitempty"`
+	Weight            int        `json:"weight,omitempty"`
+	LastCheckedAt     *time.Time `json:"last_checked_at,omitempty"`
+	FailureCount      int        `json:"failure_count,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type ProxyWithAccountCount struct {

@@ -604,9 +604,9 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		return nil, err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveRuntimeProxyURL(ctx, account, s.settingService)
+	if err != nil {
+		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorOpenAI)
 	}
 	upstreamStart := time.Now()
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)

@@ -4510,11 +4510,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	}
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
-			proxyURL = account.Proxy.URL()
-		}
+	proxyURL, err := resolveRuntimeProxyURLAllowCustomRelay(ctx, account, s.settingService)
+	if err != nil {
+		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorAnthropic)
 	}
 
 	// 解析 TLS 指纹 profile（同一请求生命周期内不变，避免重试循环中重复解析）
@@ -5005,9 +5003,9 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		return nil, fmt.Errorf("anthropic api key passthrough requires apikey token, got: %s", tokenType)
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveRuntimeProxyURL(ctx, account, s.settingService)
+	if err != nil {
+		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorAnthropic)
 	}
 
 	logger.LegacyPrintf("service.gateway", "[Anthropic 自动透传] 命中 API Key 透传分支: account=%d name=%s model=%s stream=%v",
@@ -5681,9 +5679,9 @@ func (s *GatewayService) forwardBedrock(
 		return nil, fmt.Errorf("prepare bedrock request body: %w", err)
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveRuntimeProxyURL(ctx, account, s.settingService)
+	if err != nil {
+		return nil, handleProxyDispatchError(c, err, proxyDispatchErrorAnthropic)
 	}
 
 	logger.LegacyPrintf("service.gateway", "[Bedrock] 命中 Bedrock 分支: account=%d name=%s model=%s->%s stream=%v",
@@ -8944,11 +8942,10 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 获取代理URL（自定义 base URL 模式下，proxy 通过 buildCustomRelayURL 作为查询参数传递）
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		if !account.IsCustomBaseURLEnabled() || account.GetCustomBaseURL() == "" {
-			proxyURL = account.Proxy.URL()
-		}
+	proxyURL, err := resolveRuntimeProxyURLAllowCustomRelay(ctx, account, s.settingService)
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "no available proxy and direct fallback is disabled")
+		return err
 	}
 
 	// 发送请求
@@ -9060,9 +9057,10 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		return err
 	}
 
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
+	proxyURL, err := resolveRuntimeProxyURL(ctx, account, s.settingService)
+	if err != nil {
+		s.countTokensError(c, http.StatusServiceUnavailable, "api_error", "no available proxy and direct fallback is disabled")
+		return err
 	}
 
 	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))

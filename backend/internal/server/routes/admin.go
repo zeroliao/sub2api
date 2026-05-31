@@ -43,6 +43,8 @@ func RegisterAdminRoutes(
 
 		// 代理管理
 		registerProxyRoutes(admin, h)
+		registerProxyDispatchRoutes(admin, h)
+		registerProxySubscriptionRoutes(admin, h)
 
 		// 卡密管理
 		registerRedeemCodeRoutes(admin, h)
@@ -373,16 +375,44 @@ func registerProxyRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		proxies.GET("/all", h.Admin.Proxy.GetAll)
 		proxies.GET("/data", h.Admin.Proxy.ExportData)
 		proxies.POST("/data", h.Admin.Proxy.ImportData)
+		proxies.POST("/import/preview", h.Admin.Proxy.PreviewImport)
+		proxies.POST("/import/confirm", h.Admin.Proxy.ConfirmImport)
 		proxies.GET("/:id", h.Admin.Proxy.GetByID)
 		proxies.POST("", h.Admin.Proxy.Create)
 		proxies.PUT("/:id", h.Admin.Proxy.Update)
 		proxies.DELETE("/:id", h.Admin.Proxy.Delete)
 		proxies.POST("/:id/test", h.Admin.Proxy.Test)
+		proxies.POST("/:id/health-check", h.Admin.Proxy.Test)
 		proxies.POST("/:id/quality-check", h.Admin.Proxy.CheckQuality)
 		proxies.GET("/:id/stats", h.Admin.Proxy.GetStats)
 		proxies.GET("/:id/accounts", h.Admin.Proxy.GetProxyAccounts)
 		proxies.POST("/batch-delete", h.Admin.Proxy.BatchDelete)
+		proxies.POST("/batch-health-check", h.Admin.Proxy.BatchHealthCheck)
 		proxies.POST("/batch", h.Admin.Proxy.BatchCreate)
+	}
+}
+
+func registerProxyDispatchRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	dispatch := admin.Group("/proxy-dispatch")
+	{
+		dispatch.GET("/relationships", h.Admin.Proxy.ListProxyRelationships)
+		dispatch.POST("/accounts/:id/reassign", h.Admin.Proxy.ReassignAccountProxy)
+		dispatch.POST("/accounts/:id/restore-history", h.Admin.Proxy.RestoreAccountProxyHistory)
+		dispatch.GET("/accounts/:id/history", h.Admin.Proxy.GetAccountProxyHistory)
+		dispatch.GET("/proxies/:id/accounts", h.Admin.Proxy.GetProxyAccounts)
+		dispatch.GET("/settings", h.Admin.Proxy.GetProxyDispatchSettings)
+		dispatch.PUT("/settings", h.Admin.Proxy.UpdateProxyDispatchSettings)
+	}
+}
+
+func registerProxySubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	subscriptions := admin.Group("/proxy-subscriptions")
+	{
+		subscriptions.GET("", h.Admin.Proxy.ListProxySubscriptions)
+		subscriptions.POST("", h.Admin.Proxy.CreateProxySubscription)
+		subscriptions.PUT("/:id", h.Admin.Proxy.UpdateProxySubscription)
+		subscriptions.DELETE("/:id", h.Admin.Proxy.DeleteProxySubscription)
+		subscriptions.POST("/:id/sync", h.Admin.Proxy.SyncProxySubscription)
 	}
 }
 

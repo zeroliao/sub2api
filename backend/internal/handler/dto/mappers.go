@@ -408,15 +408,26 @@ func ProxyFromService(p *service.Proxy) *Proxy {
 		return nil
 	}
 	return &Proxy{
-		ID:        p.ID,
-		Name:      p.Name,
-		Protocol:  p.Protocol,
-		Host:      p.Host,
-		Port:      p.Port,
-		Username:  p.Username,
-		Status:    p.Status,
-		CreatedAt: p.CreatedAt,
-		UpdatedAt: p.UpdatedAt,
+		ID:                p.ID,
+		Name:              p.Name,
+		Protocol:          p.Protocol,
+		Host:              p.Host,
+		Port:              p.Port,
+		Username:          p.Username,
+		Status:            p.Status,
+		Source:            p.Source,
+		ProxyType:         p.ProxyType,
+		Provider:          p.Provider,
+		Region:            p.Region,
+		ExitIP:            p.ExitIP,
+		QualityStatus:     p.QualityStatus,
+		MaxBoundAccounts:  p.MaxBoundAccounts,
+		MaxActiveAccounts: p.MaxActiveAccounts,
+		Weight:            p.Weight,
+		LastCheckedAt:     p.LastCheckedAt,
+		FailureCount:      p.FailureCount,
+		CreatedAt:         p.CreatedAt,
+		UpdatedAt:         p.UpdatedAt,
 	}
 }
 

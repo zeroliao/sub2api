@@ -12,6 +12,28 @@ const (
 	StatusExpired  = domain.StatusExpired
 )
 
+const (
+	ProxyBindingStatusActive           = "active"
+	ProxyBindingStatusInactive         = "inactive"
+	ProxyBindingStatusAccountDeleted   = "account_deleted"
+	ProxyBindingStatusProxyUnavailable = "proxy_unavailable"
+
+	ProxyBindingSourceManual   = "manual"
+	ProxyBindingSourceAuto     = "auto"
+	ProxyBindingSourceRestored = "restored"
+
+	ProxyQualityHealthy  = "healthy"
+	ProxyQualityDegraded = "degraded"
+	ProxyQualityFailed   = "failed"
+	ProxyQualityCooling  = "cooling"
+
+	DirectFallbackOff        = "off"
+	DirectFallbackManualOnly = "manual_only"
+	DirectFallbackGlobal     = "global"
+
+	SettingKeyProxyDispatchSettings = "proxy_dispatch_settings"
+)
+
 // Role constants
 const (
 	RoleAdmin = domain.RoleAdmin

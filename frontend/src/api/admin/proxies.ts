@@ -7,7 +7,12 @@ import { apiClient } from '../client'
 import type {
   Proxy,
   ProxyAccountSummary,
+  ProxyDispatchSettings,
+  ProxyImportPreview,
+  ProxyImportPreviewItem,
+  ProxyRelationship,
   ProxyQualityCheckResult,
+  ProxySubscriptionSource,
   CreateProxyRequest,
   UpdateProxyRequest,
   PaginatedResponse,
@@ -255,6 +260,108 @@ export async function importData(payload: {
   return data
 }
 
+export async function previewImport(payload: {
+  content?: string
+  url?: string
+  provider?: string
+}): Promise<ProxyImportPreview> {
+  const { data } = await apiClient.post<ProxyImportPreview>('/admin/proxies/import/preview', payload)
+  return data
+}
+
+export async function confirmImport(items: ProxyImportPreviewItem[]): Promise<{
+  created: number
+  skipped: number
+  failed: number
+  proxy_ids: number[]
+  errors?: string[]
+}> {
+  const { data } = await apiClient.post<{
+    created: number
+    skipped: number
+    failed: number
+    proxy_ids: number[]
+    errors?: string[]
+  }>('/admin/proxies/import/confirm', { items })
+  return data
+}
+
+export async function batchHealthCheck(ids: number[] = []): Promise<Array<{
+  success: boolean
+  message: string
+  latency_ms?: number
+  ip_address?: string
+}>> {
+  const { data } = await apiClient.post<Array<{
+    success: boolean
+    message: string
+    latency_ms?: number
+    ip_address?: string
+  }>>('/admin/proxies/batch-health-check', { ids })
+  return data
+}
+
+export async function listProxyRelationships(
+  page = 1,
+  pageSize = 20,
+  filters?: { platform?: string; status?: string; search?: string }
+): Promise<PaginatedResponse<ProxyRelationship>> {
+  const { data } = await apiClient.get<PaginatedResponse<ProxyRelationship>>('/admin/proxy-dispatch/relationships', {
+    params: { page, page_size: pageSize, ...filters }
+  })
+  return data
+}
+
+export async function reassignAccountProxy(accountId: number): Promise<ProxyRelationship> {
+  const { data } = await apiClient.post<ProxyRelationship>(`/admin/proxy-dispatch/accounts/${accountId}/reassign`)
+  return data
+}
+
+export async function restoreAccountProxyHistory(accountId: number): Promise<ProxyRelationship> {
+  const { data } = await apiClient.post<ProxyRelationship>(`/admin/proxy-dispatch/accounts/${accountId}/restore-history`)
+  return data
+}
+
+export async function getAccountProxyHistory(accountId: number) {
+  const { data } = await apiClient.get(`/admin/proxy-dispatch/accounts/${accountId}/history`)
+  return data
+}
+
+export async function getProxyDispatchSettings(): Promise<ProxyDispatchSettings> {
+  const { data } = await apiClient.get<ProxyDispatchSettings>('/admin/proxy-dispatch/settings')
+  return data
+}
+
+export async function updateProxyDispatchSettings(settings: ProxyDispatchSettings): Promise<ProxyDispatchSettings> {
+  const { data } = await apiClient.put<ProxyDispatchSettings>('/admin/proxy-dispatch/settings', settings)
+  return data
+}
+
+export async function listProxySubscriptions(): Promise<ProxySubscriptionSource[]> {
+  const { data } = await apiClient.get<ProxySubscriptionSource[]>('/admin/proxy-subscriptions')
+  return data
+}
+
+export async function createProxySubscription(payload: Partial<ProxySubscriptionSource>): Promise<ProxySubscriptionSource> {
+  const { data } = await apiClient.post<ProxySubscriptionSource>('/admin/proxy-subscriptions', payload)
+  return data
+}
+
+export async function updateProxySubscription(id: number, payload: Partial<ProxySubscriptionSource>): Promise<ProxySubscriptionSource> {
+  const { data } = await apiClient.put<ProxySubscriptionSource>(`/admin/proxy-subscriptions/${id}`, payload)
+  return data
+}
+
+export async function deleteProxySubscription(id: number): Promise<{ message: string }> {
+  const { data } = await apiClient.delete<{ message: string }>(`/admin/proxy-subscriptions/${id}`)
+  return data
+}
+
+export async function syncProxySubscription(id: number): Promise<ProxyImportPreview> {
+  const { data } = await apiClient.post<ProxyImportPreview>(`/admin/proxy-subscriptions/${id}/sync`)
+  return data
+}
+
 export const proxiesAPI = {
   list,
   getAll,
@@ -271,7 +378,21 @@ export const proxiesAPI = {
   batchCreate,
   batchDelete,
   exportData,
-  importData
+  importData,
+  previewImport,
+  confirmImport,
+  batchHealthCheck,
+  listProxyRelationships,
+  reassignAccountProxy,
+  restoreAccountProxyHistory,
+  getAccountProxyHistory,
+  getProxyDispatchSettings,
+  updateProxyDispatchSettings,
+  listProxySubscriptions,
+  createProxySubscription,
+  updateProxySubscription,
+  deleteProxySubscription,
+  syncProxySubscription
 }
 
 export default proxiesAPI

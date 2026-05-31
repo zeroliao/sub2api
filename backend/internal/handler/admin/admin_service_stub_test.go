@@ -589,6 +589,62 @@ func (s *stubAdminService) ResetAccountQuota(ctx context.Context, id int64) erro
 	return nil
 }
 
+func (s *stubAdminService) ListProxyRelationships(ctx context.Context, page, pageSize int, platform, status, search string) ([]service.ProxyRelationship, int64, error) {
+	return nil, 0, nil
+}
+
+func (s *stubAdminService) ReassignAccountProxy(ctx context.Context, accountID int64) (*service.ProxyRelationship, error) {
+	return &service.ProxyRelationship{AccountID: accountID}, nil
+}
+
+func (s *stubAdminService) RestoreAccountProxyHistory(ctx context.Context, accountID int64) (*service.ProxyRelationship, error) {
+	return &service.ProxyRelationship{AccountID: accountID}, nil
+}
+
+func (s *stubAdminService) GetAccountProxyHistory(ctx context.Context, accountID int64) ([]service.AccountProxyBinding, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) GetProxyDispatchSettings(ctx context.Context) (*service.ProxyDispatchSettings, error) {
+	return &service.ProxyDispatchSettings{DirectFallbackMode: service.DirectFallbackOff, AutoAssignEnabled: true}, nil
+}
+
+func (s *stubAdminService) UpdateProxyDispatchSettings(ctx context.Context, input *service.ProxyDispatchSettings) (*service.ProxyDispatchSettings, error) {
+	return input, nil
+}
+
+func (s *stubAdminService) PreviewProxyImport(ctx context.Context, input service.ProxyImportPreviewInput) (*service.ProxyImportPreview, error) {
+	return &service.ProxyImportPreview{}, nil
+}
+
+func (s *stubAdminService) ConfirmProxyImport(ctx context.Context, input service.ProxyImportConfirmInput) (*service.ProxyImportConfirmResult, error) {
+	return &service.ProxyImportConfirmResult{}, nil
+}
+
+func (s *stubAdminService) BatchHealthCheckProxies(ctx context.Context, ids []int64) ([]service.ProxyTestResult, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) ListProxySubscriptionSources(ctx context.Context) ([]service.ProxySubscriptionSource, error) {
+	return nil, nil
+}
+
+func (s *stubAdminService) CreateProxySubscriptionSource(ctx context.Context, input service.ProxySubscriptionSourceInput) (*service.ProxySubscriptionSource, error) {
+	return &service.ProxySubscriptionSource{Name: input.Name, URL: input.URL}, nil
+}
+
+func (s *stubAdminService) UpdateProxySubscriptionSource(ctx context.Context, id int64, input service.ProxySubscriptionSourceInput) (*service.ProxySubscriptionSource, error) {
+	return &service.ProxySubscriptionSource{ID: id, Name: input.Name, URL: input.URL}, nil
+}
+
+func (s *stubAdminService) DeleteProxySubscriptionSource(ctx context.Context, id int64) error {
+	return nil
+}
+
+func (s *stubAdminService) SyncProxySubscriptionSource(ctx context.Context, id int64) (*service.ProxyImportPreview, error) {
+	return &service.ProxyImportPreview{}, nil
+}
+
 func (s *stubAdminService) EnsureOpenAIPrivacy(ctx context.Context, account *service.Account) string {
 	return ""
 }

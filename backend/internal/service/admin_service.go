@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,8 +24,10 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/util/httputil"
+	"gopkg.in/yaml.v3"
 )
 
 // AdminService interface defines admin management operations
@@ -103,6 +109,20 @@ type AdminService interface {
 	CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error)
 	TestProxy(ctx context.Context, id int64) (*ProxyTestResult, error)
 	CheckProxyQuality(ctx context.Context, id int64) (*ProxyQualityCheckResult, error)
+	ListProxyRelationships(ctx context.Context, page, pageSize int, platform, status, search string) ([]ProxyRelationship, int64, error)
+	ReassignAccountProxy(ctx context.Context, accountID int64) (*ProxyRelationship, error)
+	RestoreAccountProxyHistory(ctx context.Context, accountID int64) (*ProxyRelationship, error)
+	GetAccountProxyHistory(ctx context.Context, accountID int64) ([]AccountProxyBinding, error)
+	GetProxyDispatchSettings(ctx context.Context) (*ProxyDispatchSettings, error)
+	UpdateProxyDispatchSettings(ctx context.Context, input *ProxyDispatchSettings) (*ProxyDispatchSettings, error)
+	PreviewProxyImport(ctx context.Context, input ProxyImportPreviewInput) (*ProxyImportPreview, error)
+	ConfirmProxyImport(ctx context.Context, input ProxyImportConfirmInput) (*ProxyImportConfirmResult, error)
+	BatchHealthCheckProxies(ctx context.Context, ids []int64) ([]ProxyTestResult, error)
+	ListProxySubscriptionSources(ctx context.Context) ([]ProxySubscriptionSource, error)
+	CreateProxySubscriptionSource(ctx context.Context, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error)
+	UpdateProxySubscriptionSource(ctx context.Context, id int64, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error)
+	DeleteProxySubscriptionSource(ctx context.Context, id int64) error
+	SyncProxySubscriptionSource(ctx context.Context, id int64) (*ProxyImportPreview, error)
 
 	// Redeem code management
 	ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]RedeemCode, int64, error)
@@ -373,22 +393,158 @@ type BulkUpdateAccountsResult struct {
 }
 
 type CreateProxyInput struct {
-	Name     string
-	Protocol string
-	Host     string
-	Port     int
-	Username string
-	Password string
+	Name              string
+	Protocol          string
+	Host              string
+	Port              int
+	Username          string
+	Password          string
+	Source            string
+	ProxyType         string
+	Provider          string
+	Region            string
+	ExitIP            string
+	QualityStatus     string
+	MaxBoundAccounts  *int
+	MaxActiveAccounts *int
+	Weight            int
 }
 
 type UpdateProxyInput struct {
-	Name     string
-	Protocol string
-	Host     string
-	Port     int
-	Username string
-	Password string
-	Status   string
+	Name              string
+	Protocol          string
+	Host              string
+	Port              int
+	Username          string
+	Password          string
+	Status            string
+	Source            string
+	ProxyType         string
+	Provider          string
+	Region            string
+	ExitIP            string
+	QualityStatus     string
+	MaxBoundAccounts  *int
+	MaxActiveAccounts *int
+	Weight            *int
+}
+
+type AccountProxyBinding struct {
+	ID            int64      `json:"id"`
+	IdentityKey   string     `json:"identity_key"`
+	Platform      string     `json:"platform"`
+	AccountID     *int64     `json:"account_id,omitempty"`
+	ProxyID       int64      `json:"proxy_id"`
+	Status        string     `json:"status"`
+	Source        string     `json:"source"`
+	FirstUsedAt   time.Time  `json:"first_used_at"`
+	LastUsedAt    time.Time  `json:"last_used_at"`
+	LastSuccessAt *time.Time `json:"last_success_at,omitempty"`
+	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+	UseCount      int64      `json:"use_count"`
+	Proxy         *Proxy     `json:"proxy,omitempty"`
+}
+
+type ProxyRelationship struct {
+	AccountID          int64      `json:"account_id"`
+	AccountName        string     `json:"account_name"`
+	Platform           string     `json:"platform"`
+	AccountType        string     `json:"account_type"`
+	AccountStatus      string     `json:"account_status"`
+	IdentityKey        string     `json:"identity_key"`
+	CurrentProxy       *Proxy     `json:"current_proxy,omitempty"`
+	ProxySource        string     `json:"proxy_source"`
+	BindingStatus      string     `json:"binding_status"`
+	BindingID          *int64     `json:"binding_id,omitempty"`
+	LastUsedAt         *time.Time `json:"last_used_at,omitempty"`
+	HistoryProxyCount  int64      `json:"history_proxy_count"`
+	BoundAccountCount  int64      `json:"bound_account_count"`
+	ActiveAccountCount int64      `json:"active_account_count"`
+	CurrentConcurrency int64      `json:"current_concurrency"`
+	LastSwitchReason   string     `json:"last_switch_reason,omitempty"`
+	LastFailureReason  string     `json:"last_failure_reason,omitempty"`
+	DirectFallbackMode string     `json:"direct_fallback_mode"`
+	NoAvailableProxy   bool       `json:"no_available_proxy"`
+}
+
+type ProxyDispatchSettings struct {
+	DirectFallbackMode string `json:"direct_fallback_mode"`
+	AutoAssignEnabled  bool   `json:"auto_assign_enabled"`
+}
+
+type ProxyImportPreviewInput struct {
+	Content  string `json:"content"`
+	URL      string `json:"url"`
+	Provider string `json:"provider"`
+}
+
+type ProxyImportPreviewItem struct {
+	Key             string `json:"key"`
+	Name            string `json:"name"`
+	Protocol        string `json:"protocol"`
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
+	Username        string `json:"username,omitempty"`
+	Password        string `json:"password,omitempty"`
+	Source          string `json:"source"`
+	ProxyType       string `json:"proxy_type"`
+	Provider        string `json:"provider,omitempty"`
+	Region          string `json:"region,omitempty"`
+	QualityStatus   string `json:"quality_status"`
+	SidecarRequired bool   `json:"sidecar_required"`
+	SidecarHint     string `json:"sidecar_hint,omitempty"`
+	Duplicate       bool   `json:"duplicate"`
+	Valid           bool   `json:"valid"`
+	Error           string `json:"error,omitempty"`
+	Selected        bool   `json:"selected"`
+	Raw             string `json:"raw,omitempty"`
+}
+
+type ProxyImportPreview struct {
+	Items          []ProxyImportPreviewItem `json:"items"`
+	Total          int                      `json:"total"`
+	Valid          int                      `json:"valid"`
+	Duplicates     int                      `json:"duplicates"`
+	SidecarOnly    int                      `json:"sidecar_only"`
+	Recommended    int                      `json:"recommended"`
+	SourceDetected string                   `json:"source_detected"`
+}
+
+type ProxyImportConfirmInput struct {
+	Items []ProxyImportPreviewItem `json:"items"`
+}
+
+type ProxyImportConfirmResult struct {
+	Created  int      `json:"created"`
+	Skipped  int      `json:"skipped"`
+	Failed   int      `json:"failed"`
+	ProxyIDs []int64  `json:"proxy_ids"`
+	Errors   []string `json:"errors,omitempty"`
+}
+
+type ProxySubscriptionSource struct {
+	ID                  int64      `json:"id"`
+	Name                string     `json:"name"`
+	URL                 string     `json:"url"`
+	SourceType          string     `json:"source_type"`
+	Provider            string     `json:"provider,omitempty"`
+	SyncEnabled         bool       `json:"sync_enabled"`
+	SyncIntervalMinutes int        `json:"sync_interval_minutes"`
+	LastSyncedAt        *time.Time `json:"last_synced_at,omitempty"`
+	LastError           string     `json:"last_error,omitempty"`
+	Status              string     `json:"status"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+type ProxySubscriptionSourceInput struct {
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	SourceType          string `json:"source_type"`
+	Provider            string `json:"provider"`
+	SyncEnabled         *bool  `json:"sync_enabled"`
+	SyncIntervalMinutes int    `json:"sync_interval_minutes"`
+	Status              string `json:"status"`
 }
 
 type GenerateRedeemCodesInput struct {
@@ -2417,6 +2573,15 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := s.accountRepo.Create(ctx, account); err != nil {
 		return nil, err
 	}
+	if input.ProxyID != nil && *input.ProxyID > 0 {
+		if err := s.recordAccountProxyBinding(ctx, account, *input.ProxyID, ProxyBindingSourceManual, ProxyBindingStatusActive); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to record manual proxy binding for account %d: %v", account.ID, err)
+		}
+	} else if settings, err := s.GetProxyDispatchSettings(ctx); err == nil && settings.AutoAssignEnabled && s.entClient != nil {
+		if _, err := s.assignProxyForAccount(ctx, account, false); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to auto assign proxy for account %d: %v", account.ID, err)
+		}
+	}
 
 	// 绑定分组
 	if len(groupIDs) > 0 {
@@ -2562,6 +2727,15 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, err
+	}
+	if input.ProxyID != nil {
+		if account.ProxyID != nil && *account.ProxyID > 0 {
+			if err := s.recordAccountProxyBinding(ctx, account, *account.ProxyID, ProxyBindingSourceManual, ProxyBindingStatusActive); err != nil {
+				logger.LegacyPrintf("service.admin", "failed to record manual proxy binding for account %d: %v", account.ID, err)
+			}
+		} else if err := s.deactivateAccountProxyBindings(ctx, account); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to deactivate proxy bindings for account %d: %v", account.ID, err)
+		}
 	}
 
 	// 绑定分组
@@ -2755,8 +2929,14 @@ func (s *adminServiceImpl) resolveBulkUpdateTargetIDs(ctx context.Context, filte
 }
 
 func (s *adminServiceImpl) DeleteAccount(ctx context.Context, id int64) error {
+	account, _ := s.accountRepo.GetByID(ctx, id)
 	if err := s.accountRepo.Delete(ctx, id); err != nil {
 		return err
+	}
+	if account != nil {
+		if err := s.markAccountProxyBindingsDeleted(ctx, account); err != nil {
+			logger.LegacyPrintf("service.admin", "failed to mark proxy bindings deleted for account %d: %v", id, err)
+		}
 	}
 	return nil
 }
@@ -2811,6 +2991,7 @@ func (s *adminServiceImpl) ListProxies(ctx context.Context, page, pageSize int, 
 	if err != nil {
 		return nil, 0, err
 	}
+	s.attachProxyMetadata(ctx, proxies)
 	return proxies, result.Total, nil
 }
 
@@ -2820,12 +3001,31 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 	if err != nil {
 		return nil, 0, err
 	}
+	base := make([]Proxy, 0, len(proxies))
+	for i := range proxies {
+		base = append(base, proxies[i].Proxy)
+	}
+	s.attachProxyMetadata(ctx, base)
+	for i := range proxies {
+		proxies[i].Proxy = base[i]
+		if proxies[i].QualityStatus == "" {
+			proxies[i].QualityStatus = proxies[i].Proxy.QualityStatus
+		}
+		if proxies[i].IPAddress == "" {
+			proxies[i].IPAddress = proxies[i].Proxy.ExitIP
+		}
+	}
 	s.attachProxyLatency(ctx, proxies)
 	return proxies, result.Total, nil
 }
 
 func (s *adminServiceImpl) GetAllProxies(ctx context.Context) ([]Proxy, error) {
-	return s.proxyRepo.ListActive(ctx)
+	proxies, err := s.proxyRepo.ListActive(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.attachProxyMetadata(ctx, proxies)
+	return proxies, nil
 }
 
 func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([]ProxyWithAccountCount, error) {
@@ -2833,16 +3033,41 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 	if err != nil {
 		return nil, err
 	}
+	base := make([]Proxy, 0, len(proxies))
+	for i := range proxies {
+		base = append(base, proxies[i].Proxy)
+	}
+	s.attachProxyMetadata(ctx, base)
+	for i := range proxies {
+		proxies[i].Proxy = base[i]
+		if proxies[i].QualityStatus == "" {
+			proxies[i].QualityStatus = proxies[i].Proxy.QualityStatus
+		}
+		if proxies[i].IPAddress == "" {
+			proxies[i].IPAddress = proxies[i].Proxy.ExitIP
+		}
+	}
 	s.attachProxyLatency(ctx, proxies)
 	return proxies, nil
 }
 
 func (s *adminServiceImpl) GetProxy(ctx context.Context, id int64) (*Proxy, error) {
-	return s.proxyRepo.GetByID(ctx, id)
+	proxy, err := s.proxyRepo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	enriched := []Proxy{*proxy}
+	s.attachProxyMetadata(ctx, enriched)
+	return &enriched[0], nil
 }
 
 func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]Proxy, error) {
-	return s.proxyRepo.ListByIDs(ctx, ids)
+	proxies, err := s.proxyRepo.ListByIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	s.attachProxyMetadata(ctx, proxies)
+	return proxies, nil
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
@@ -2855,7 +3080,11 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 		Password: input.Password,
 		Status:   StatusActive,
 	}
+	applyProxyInputMetadata(proxy, input)
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
+		return nil, err
+	}
+	if err := s.saveProxyMetadata(ctx, proxy.ID, proxy); err != nil {
 		return nil, err
 	}
 	// Probe latency asynchronously so creation isn't blocked by network timeout.
@@ -2890,8 +3119,12 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if input.Status != "" {
 		proxy.Status = input.Status
 	}
+	applyProxyUpdateMetadata(proxy, input)
 
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
+		return nil, err
+	}
+	if err := s.saveProxyMetadata(ctx, proxy.ID, proxy); err != nil {
 		return nil, err
 	}
 	return proxy, nil
@@ -2949,6 +3182,376 @@ func (s *adminServiceImpl) GetProxyAccounts(ctx context.Context, proxyID int64) 
 
 func (s *adminServiceImpl) CheckProxyExists(ctx context.Context, host string, port int, username, password string) (bool, error) {
 	return s.proxyRepo.ExistsByHostPortAuth(ctx, host, port, username, password)
+}
+
+func (s *adminServiceImpl) ListProxyRelationships(ctx context.Context, page, pageSize int, platform, status, search string) ([]ProxyRelationship, int64, error) {
+	if s == nil || s.entClient == nil {
+		return nil, 0, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
+	}
+	accounts, total, err := s.ListAccounts(ctx, page, pageSize, platform, "", status, search, 0, "", "id", "desc")
+	if err != nil {
+		return nil, 0, err
+	}
+	settings, _ := s.GetProxyDispatchSettings(ctx)
+	out := make([]ProxyRelationship, 0, len(accounts))
+	for i := range accounts {
+		rel, err := s.proxyRelationshipForAccount(ctx, &accounts[i])
+		if err != nil {
+			return nil, 0, err
+		}
+		if settings != nil {
+			rel.DirectFallbackMode = settings.DirectFallbackMode
+		}
+		out = append(out, *rel)
+	}
+	return out, total, nil
+}
+
+func (s *adminServiceImpl) ReassignAccountProxy(ctx context.Context, accountID int64) (*ProxyRelationship, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.assignProxyForAccount(ctx, account, true); err != nil {
+		return nil, err
+	}
+	account, _ = s.accountRepo.GetByID(ctx, accountID)
+	return s.proxyRelationshipForAccount(ctx, account)
+}
+
+func (s *adminServiceImpl) RestoreAccountProxyHistory(ctx context.Context, accountID int64) (*ProxyRelationship, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return nil, infraerrors.BadRequest("ACCOUNT_IDENTITY_UNAVAILABLE", "account identity is unavailable")
+	}
+	proxyID, ok, err := s.findHistoricalProxy(ctx, identityKey)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("NO_AVAILABLE_PROXY", "no available historical proxy")
+	}
+	account.ProxyID = &proxyID
+	account.Proxy = nil
+	if err := s.accountRepo.Update(ctx, account); err != nil {
+		return nil, err
+	}
+	if err := s.recordAccountProxyBinding(ctx, account, proxyID, ProxyBindingSourceRestored, ProxyBindingStatusActive); err != nil {
+		return nil, err
+	}
+	account, _ = s.accountRepo.GetByID(ctx, accountID)
+	return s.proxyRelationshipForAccount(ctx, account)
+}
+
+func (s *adminServiceImpl) GetAccountProxyHistory(ctx context.Context, accountID int64) ([]AccountProxyBinding, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
+	}
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return []AccountProxyBinding{}, nil
+	}
+	return s.listProxyBindingsByIdentity(ctx, identityKey)
+}
+
+func (s *adminServiceImpl) GetProxyDispatchSettings(ctx context.Context) (*ProxyDispatchSettings, error) {
+	defaults := &ProxyDispatchSettings{DirectFallbackMode: DirectFallbackOff, AutoAssignEnabled: true}
+	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
+		return defaults, nil
+	}
+	raw, err := s.settingService.settingRepo.GetValue(ctx, SettingKeyProxyDispatchSettings)
+	if err != nil {
+		if errors.Is(err, ErrSettingNotFound) {
+			return defaults, nil
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return defaults, nil
+	}
+	if err := json.Unmarshal([]byte(raw), defaults); err != nil {
+		return nil, err
+	}
+	defaults.DirectFallbackMode = normalizeDirectFallbackMode(defaults.DirectFallbackMode)
+	return defaults, nil
+}
+
+func (s *adminServiceImpl) UpdateProxyDispatchSettings(ctx context.Context, input *ProxyDispatchSettings) (*ProxyDispatchSettings, error) {
+	if input == nil {
+		input = &ProxyDispatchSettings{}
+	}
+	settings := &ProxyDispatchSettings{
+		DirectFallbackMode: normalizeDirectFallbackMode(input.DirectFallbackMode),
+		AutoAssignEnabled:  input.AutoAssignEnabled,
+	}
+	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("SETTING_SERVICE_UNAVAILABLE", "setting service unavailable")
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.settingService.settingRepo.Set(ctx, SettingKeyProxyDispatchSettings, string(data)); err != nil {
+		return nil, err
+	}
+	return settings, nil
+}
+
+func (s *adminServiceImpl) PreviewProxyImport(ctx context.Context, input ProxyImportPreviewInput) (*ProxyImportPreview, error) {
+	content := strings.TrimSpace(input.Content)
+	sourceDetected := "text"
+	if strings.TrimSpace(input.URL) != "" {
+		body, err := fetchProxySubscription(ctx, input.URL)
+		if err != nil {
+			return nil, err
+		}
+		content = body
+		sourceDetected = "subscription_url"
+	} else if looksLikeSubscriptionURL(content) {
+		body, err := fetchProxySubscription(ctx, content)
+		if err != nil {
+			return nil, err
+		}
+		content = body
+		sourceDetected = "subscription_url"
+	}
+	if decoded := decodeMaybeBase64Subscription(content); decoded != "" {
+		content = decoded
+		if sourceDetected == "text" {
+			sourceDetected = "base64_subscription"
+		}
+	}
+	items := parseProxyImportItems(content, strings.TrimSpace(input.Provider))
+	if strings.Contains(content, "proxies:") {
+		sourceDetected = "clash_yaml"
+	} else if strings.Contains(content, `"outbounds"`) {
+		sourceDetected = "sing_box_json"
+	}
+	for i := range items {
+		if items[i].Key == "" {
+			items[i].Key = proxyImportItemKey(items[i])
+		}
+		if items[i].QualityStatus == "" {
+			items[i].QualityStatus = ProxyQualityHealthy
+		}
+		if items[i].Source == "" {
+			items[i].Source = "import"
+		}
+		if items[i].ProxyType == "" {
+			items[i].ProxyType = "datacenter"
+		}
+		if items[i].Provider == "" {
+			items[i].Provider = strings.TrimSpace(input.Provider)
+		}
+		items[i].Duplicate, _ = s.CheckProxyExists(ctx, items[i].Host, items[i].Port, items[i].Username, items[i].Password)
+		items[i].Selected = items[i].Valid && !items[i].Duplicate && !items[i].SidecarRequired
+	}
+	preview := &ProxyImportPreview{Items: items, Total: len(items), SourceDetected: sourceDetected}
+	for _, item := range items {
+		if item.Valid {
+			preview.Valid++
+		}
+		if item.Duplicate {
+			preview.Duplicates++
+		}
+		if item.SidecarRequired {
+			preview.SidecarOnly++
+		}
+		if item.Selected {
+			preview.Recommended++
+		}
+	}
+	return preview, nil
+}
+
+func (s *adminServiceImpl) ConfirmProxyImport(ctx context.Context, input ProxyImportConfirmInput) (*ProxyImportConfirmResult, error) {
+	result := &ProxyImportConfirmResult{}
+	for _, item := range input.Items {
+		if !item.Valid || item.SidecarRequired || !item.Selected {
+			result.Skipped++
+			continue
+		}
+		exists, err := s.CheckProxyExists(ctx, item.Host, item.Port, item.Username, item.Password)
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+		if exists {
+			result.Skipped++
+			continue
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = fmt.Sprintf("%s:%d", item.Host, item.Port)
+		}
+		proxy, err := s.CreateProxy(ctx, &CreateProxyInput{
+			Name:          name,
+			Protocol:      item.Protocol,
+			Host:          item.Host,
+			Port:          item.Port,
+			Username:      item.Username,
+			Password:      item.Password,
+			Source:        item.Source,
+			ProxyType:     item.ProxyType,
+			Provider:      item.Provider,
+			Region:        item.Region,
+			QualityStatus: item.QualityStatus,
+			Weight:        100,
+		})
+		if err != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+		result.Created++
+		result.ProxyIDs = append(result.ProxyIDs, proxy.ID)
+	}
+	return result, nil
+}
+
+func (s *adminServiceImpl) BatchHealthCheckProxies(ctx context.Context, ids []int64) ([]ProxyTestResult, error) {
+	if len(ids) == 0 {
+		proxies, err := s.GetAllProxies(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, proxy := range proxies {
+			ids = append(ids, proxy.ID)
+		}
+	}
+	results := make([]ProxyTestResult, 0, len(ids))
+	for _, id := range ids {
+		result, err := s.TestProxy(ctx, id)
+		if err != nil {
+			results = append(results, ProxyTestResult{Success: false, Message: err.Error()})
+			continue
+		}
+		results = append(results, *result)
+	}
+	return results, nil
+}
+
+func (s *adminServiceImpl) ListProxySubscriptionSources(ctx context.Context) ([]ProxySubscriptionSource, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
+       last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at
+FROM proxy_subscription_sources
+WHERE deleted_at IS NULL
+ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []ProxySubscriptionSource
+	for rows.Next() {
+		var item ProxySubscriptionSource
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (s *adminServiceImpl) CreateProxySubscriptionSource(ctx context.Context, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	input = normalizeProxySubscriptionInput(input)
+	rows, err := s.entClient.QueryContext(ctx, `
+INSERT INTO proxy_subscription_sources (name, url, source_type, provider, sync_enabled, sync_interval_minutes, status, created_at, updated_at)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NOW(), NOW())
+RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
+          last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at`,
+		input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var item ProxySubscriptionSource
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		return &item, nil
+	}
+	return nil, rows.Err()
+}
+
+func (s *adminServiceImpl) UpdateProxySubscriptionSource(ctx context.Context, id int64, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	input = normalizeProxySubscriptionInput(input)
+	rows, err := s.entClient.QueryContext(ctx, `
+UPDATE proxy_subscription_sources
+SET name = $2, url = $3, source_type = $4, provider = NULLIF($5, ''),
+    sync_enabled = $6, sync_interval_minutes = $7, status = $8, updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL
+RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
+          last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at`,
+		id, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var item ProxySubscriptionSource
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		return &item, nil
+	}
+	return nil, ErrProxyNotFound
+}
+
+func (s *adminServiceImpl) DeleteProxySubscriptionSource(ctx context.Context, id int64) error {
+	if s == nil || s.entClient == nil {
+		return infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	_, err := s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET deleted_at = NOW(), updated_at = NOW(), status = 'inactive' WHERE id = $1 AND deleted_at IS NULL`, id)
+	return err
+}
+
+func (s *adminServiceImpl) SyncProxySubscriptionSource(ctx context.Context, id int64) (*ProxyImportPreview, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	rows, err := s.entClient.QueryContext(ctx, `SELECT url, COALESCE(provider, '') FROM proxy_subscription_sources WHERE id = $1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var url, provider string
+	if rows.Next() {
+		if err := rows.Scan(&url, &provider); err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, ErrProxyNotFound
+	}
+	preview, err := s.PreviewProxyImport(ctx, ProxyImportPreviewInput{URL: url, Provider: provider})
+	lastErr := ""
+	if err != nil {
+		lastErr = err.Error()
+	}
+	_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_synced_at = NOW(), last_error = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`, id, lastErr)
+	return preview, err
 }
 
 // Redeem code management implementations
@@ -3169,6 +3772,772 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	return result, nil
 }
 
+func applyProxyInputMetadata(proxy *Proxy, input *CreateProxyInput) {
+	if proxy == nil || input == nil {
+		return
+	}
+	proxy.Source = defaultString(input.Source, "manual")
+	proxy.ProxyType = defaultString(input.ProxyType, "datacenter")
+	proxy.Provider = strings.TrimSpace(input.Provider)
+	proxy.Region = strings.TrimSpace(input.Region)
+	proxy.ExitIP = strings.TrimSpace(input.ExitIP)
+	proxy.QualityStatus = normalizeProxyQualityStatus(input.QualityStatus)
+	proxy.MaxBoundAccounts = input.MaxBoundAccounts
+	proxy.MaxActiveAccounts = input.MaxActiveAccounts
+	if input.Weight > 0 {
+		proxy.Weight = input.Weight
+	} else {
+		proxy.Weight = 100
+	}
+}
+
+func applyProxyUpdateMetadata(proxy *Proxy, input *UpdateProxyInput) {
+	if proxy == nil || input == nil {
+		return
+	}
+	if strings.TrimSpace(input.Source) != "" {
+		proxy.Source = strings.TrimSpace(input.Source)
+	}
+	if strings.TrimSpace(input.ProxyType) != "" {
+		proxy.ProxyType = strings.TrimSpace(input.ProxyType)
+	}
+	if input.Provider != "" {
+		proxy.Provider = strings.TrimSpace(input.Provider)
+	}
+	if input.Region != "" {
+		proxy.Region = strings.TrimSpace(input.Region)
+	}
+	if input.ExitIP != "" {
+		proxy.ExitIP = strings.TrimSpace(input.ExitIP)
+	}
+	if input.QualityStatus != "" {
+		proxy.QualityStatus = normalizeProxyQualityStatus(input.QualityStatus)
+	}
+	if input.MaxBoundAccounts != nil {
+		proxy.MaxBoundAccounts = input.MaxBoundAccounts
+	}
+	if input.MaxActiveAccounts != nil {
+		proxy.MaxActiveAccounts = input.MaxActiveAccounts
+	}
+	if input.Weight != nil && *input.Weight > 0 {
+		proxy.Weight = *input.Weight
+	}
+}
+
+func defaultString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func normalizeProxyQualityStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case ProxyQualityDegraded, "warn", "warning", "challenge":
+		return ProxyQualityDegraded
+	case ProxyQualityFailed, "fail":
+		return ProxyQualityFailed
+	case ProxyQualityCooling:
+		return ProxyQualityCooling
+	default:
+		return ProxyQualityHealthy
+	}
+}
+
+func normalizeDirectFallbackMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case DirectFallbackManualOnly:
+		return DirectFallbackManualOnly
+	case DirectFallbackGlobal:
+		return DirectFallbackGlobal
+	default:
+		return DirectFallbackOff
+	}
+}
+
+func (s *adminServiceImpl) attachProxyMetadata(ctx context.Context, proxies []Proxy) {
+	if len(proxies) == 0 || s == nil || s.entClient == nil {
+		return
+	}
+	ids := make([]string, 0, len(proxies))
+	for i := range proxies {
+		ids = append(ids, strconv.FormatInt(proxies[i].ID, 10))
+	}
+	rows, err := s.entClient.QueryContext(ctx, fmt.Sprintf(`
+SELECT id, source, proxy_type, COALESCE(provider, ''), COALESCE(region, ''), COALESCE(exit_ip, ''),
+       quality_status, max_bound_accounts, max_active_accounts, weight, last_checked_at, failure_count
+FROM proxies
+WHERE id IN (%s)`, strings.Join(ids, ",")))
+	if err != nil {
+		return
+	}
+	defer func() { _ = rows.Close() }()
+	type meta struct {
+		Source            string
+		ProxyType         string
+		Provider          string
+		Region            string
+		ExitIP            string
+		QualityStatus     string
+		MaxBoundAccounts  *int
+		MaxActiveAccounts *int
+		Weight            int
+		LastCheckedAt     *time.Time
+		FailureCount      int
+	}
+	byID := map[int64]meta{}
+	for rows.Next() {
+		var id int64
+		var m meta
+		if err := rows.Scan(&id, &m.Source, &m.ProxyType, &m.Provider, &m.Region, &m.ExitIP, &m.QualityStatus, &m.MaxBoundAccounts, &m.MaxActiveAccounts, &m.Weight, &m.LastCheckedAt, &m.FailureCount); err != nil {
+			continue
+		}
+		byID[id] = m
+	}
+	for i := range proxies {
+		m, ok := byID[proxies[i].ID]
+		if !ok {
+			proxies[i].Source = "manual"
+			proxies[i].ProxyType = "datacenter"
+			proxies[i].QualityStatus = ProxyQualityHealthy
+			proxies[i].Weight = 100
+			continue
+		}
+		proxies[i].Source = m.Source
+		proxies[i].ProxyType = m.ProxyType
+		proxies[i].Provider = m.Provider
+		proxies[i].Region = m.Region
+		proxies[i].ExitIP = m.ExitIP
+		proxies[i].QualityStatus = m.QualityStatus
+		proxies[i].MaxBoundAccounts = m.MaxBoundAccounts
+		proxies[i].MaxActiveAccounts = m.MaxActiveAccounts
+		proxies[i].Weight = m.Weight
+		proxies[i].LastCheckedAt = m.LastCheckedAt
+		proxies[i].FailureCount = m.FailureCount
+	}
+}
+
+func (s *adminServiceImpl) saveProxyMetadata(ctx context.Context, id int64, proxy *Proxy) error {
+	if proxy == nil || s == nil || s.entClient == nil {
+		return nil
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+UPDATE proxies
+SET source = $2, proxy_type = $3, provider = NULLIF($4, ''), region = NULLIF($5, ''),
+    exit_ip = NULLIF($6, ''), quality_status = $7, max_bound_accounts = $8,
+    max_active_accounts = $9, weight = $10, failure_count = $11
+WHERE id = $1`,
+		id,
+		defaultString(proxy.Source, "manual"),
+		defaultString(proxy.ProxyType, "datacenter"),
+		proxy.Provider,
+		proxy.Region,
+		proxy.ExitIP,
+		normalizeProxyQualityStatus(proxy.QualityStatus),
+		proxy.MaxBoundAccounts,
+		proxy.MaxActiveAccounts,
+		maxInt(proxy.Weight, 100),
+		proxy.FailureCount,
+	)
+	return err
+}
+
+func maxInt(v, fallback int) int {
+	if v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+func accountProxyIdentityKey(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	platform := strings.ToLower(strings.TrimSpace(account.Platform))
+	kind, raw := accountProxyIdentityRaw(account)
+	if raw == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(platform + ":" + kind + ":" + raw))
+	return platform + ":" + kind + ":" + hex.EncodeToString(sum[:])
+}
+
+func accountProxyIdentityRaw(account *Account) (string, string) {
+	if account == nil {
+		return "", ""
+	}
+	cred := func(key string) string { return strings.TrimSpace(account.GetCredential(key)) }
+	lowerCred := func(key string) string { return strings.ToLower(cred(key)) }
+	switch account.Platform {
+	case PlatformOpenAI:
+		if account.Type == AccountTypeOAuth {
+			if v := cred("chatgpt_account_id"); v != "" {
+				return "chatgpt_account_id", v
+			}
+			if userID := cred("chatgpt_user_id"); userID != "" {
+				if orgID := cred("organization_id"); orgID != "" {
+					return "chatgpt_user_org", userID + "|" + orgID
+				}
+			}
+			if idToken := cred("id_token"); idToken != "" {
+				if claims, err := openaiutil.DecodeIDToken(idToken); err == nil && claims.Sub != "" {
+					return "id_token_sub", claims.Sub
+				}
+				if claims, err := openaiutil.ParseIDToken(idToken); err == nil && claims.Sub != "" {
+					return "id_token_sub", claims.Sub
+				}
+			}
+			if v := lowerCred("email"); v != "" {
+				return "email", v
+			}
+		}
+		if v := cred("api_key"); v != "" {
+			return "api_key", v
+		}
+	case PlatformGemini, PlatformAnthropic, PlatformAntigravity:
+		for _, key := range []string{"account_id", "user_id", "subject", "sub"} {
+			if v := cred(key); v != "" {
+				return key, v
+			}
+		}
+		if idToken := cred("id_token"); idToken != "" {
+			if sub := jwtSubWithoutValidation(idToken); sub != "" {
+				return "id_token_sub", sub
+			}
+		}
+		if v := lowerCred("email"); v != "" {
+			return "email", v
+		}
+		if v := cred("api_key"); v != "" {
+			return "api_key", v
+		}
+	}
+	if account.Type == AccountTypeServiceAccount {
+		if v := cred("client_email"); v != "" {
+			return "client_email", strings.ToLower(v)
+		}
+		privateKeyID := cred("private_key_id")
+		projectID := cred("project_id")
+		if privateKeyID != "" && projectID != "" {
+			return "private_key_project", privateKeyID + "|" + projectID
+		}
+	}
+	if account.ID > 0 {
+		return "account_id", strconv.FormatInt(account.ID, 10)
+	}
+	return "", ""
+}
+
+func jwtSubWithoutValidation(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(claims.Sub)
+}
+
+func (s *adminServiceImpl) assignProxyForAccount(ctx context.Context, account *Account, force bool) (*Proxy, error) {
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	if s == nil || s.entClient == nil || s.accountRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_DISPATCH_UNAVAILABLE", "proxy dispatch service unavailable")
+	}
+	if account.ProxyID != nil && *account.ProxyID > 0 && !force {
+		proxy, err := s.GetProxy(ctx, *account.ProxyID)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.recordAccountProxyBinding(ctx, account, proxy.ID, ProxyBindingSourceManual, ProxyBindingStatusActive); err != nil {
+			return nil, err
+		}
+		return proxy, nil
+	}
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return nil, infraerrors.BadRequest("ACCOUNT_IDENTITY_UNAVAILABLE", "account identity is unavailable")
+	}
+	if proxyID, ok, err := s.findHistoricalProxy(ctx, identityKey); err != nil {
+		return nil, err
+	} else if ok {
+		account.ProxyID = &proxyID
+		account.Proxy = nil
+		if err := s.accountRepo.Update(ctx, account); err != nil {
+			return nil, err
+		}
+		if err := s.recordAccountProxyBinding(ctx, account, proxyID, ProxyBindingSourceRestored, ProxyBindingStatusActive); err != nil {
+			return nil, err
+		}
+		return s.GetProxy(ctx, proxyID)
+	}
+	proxy, err := s.chooseNewProxy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account.ProxyID = &proxy.ID
+	account.Proxy = nil
+	if err := s.accountRepo.Update(ctx, account); err != nil {
+		return nil, err
+	}
+	if err := s.recordAccountProxyBinding(ctx, account, proxy.ID, ProxyBindingSourceAuto, ProxyBindingStatusActive); err != nil {
+		return nil, err
+	}
+	return proxy, nil
+}
+
+func (s *adminServiceImpl) findHistoricalProxy(ctx context.Context, identityKey string) (int64, bool, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT b.proxy_id
+FROM account_proxy_bindings b
+JOIN proxies p ON p.id = b.proxy_id AND p.deleted_at IS NULL
+WHERE b.identity_key = $1
+  AND b.status IN ('active', 'account_deleted', 'inactive')
+  AND p.status = 'active'
+  AND COALESCE(p.quality_status, 'healthy') NOT IN ('failed', 'cooling')
+ORDER BY b.last_used_at DESC, b.id DESC
+LIMIT 1`, identityKey)
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	var proxyID int64
+	if rows.Next() {
+		if err := rows.Scan(&proxyID); err != nil {
+			return 0, false, err
+		}
+		return proxyID, true, nil
+	}
+	return 0, false, rows.Err()
+}
+
+func (s *adminServiceImpl) chooseNewProxy(ctx context.Context) (*Proxy, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT p.id, p.name, p.protocol, p.host, p.port, COALESCE(p.username, ''), COALESCE(p.password, ''),
+       p.status, p.created_at, p.updated_at,
+       COALESCE(p.source, 'manual'), COALESCE(p.proxy_type, 'datacenter'), COALESCE(p.provider, ''),
+       COALESCE(p.region, ''), COALESCE(p.exit_ip, ''), COALESCE(p.quality_status, 'healthy'),
+       p.max_bound_accounts, p.max_active_accounts, COALESCE(p.weight, 100), p.last_checked_at,
+       COALESCE(p.failure_count, 0),
+       COALESCE(bound.bound_count, 0), COALESCE(active.active_count, 0), COALESCE(active.current_concurrency, 0)
+FROM proxies p
+LEFT JOIN (
+  SELECT proxy_id, COUNT(DISTINCT identity_key) AS bound_count
+  FROM account_proxy_bindings
+  WHERE status = 'active'
+  GROUP BY proxy_id
+) bound ON bound.proxy_id = p.id
+LEFT JOIN (
+  SELECT proxy_id, COUNT(*) AS active_count, COALESCE(SUM(concurrency), 0) AS current_concurrency
+  FROM accounts
+  WHERE deleted_at IS NULL AND status = 'active' AND proxy_id IS NOT NULL
+  GROUP BY proxy_id
+) active ON active.proxy_id = p.id
+WHERE p.deleted_at IS NULL
+  AND p.status = 'active'
+  AND COALESCE(p.quality_status, 'healthy') NOT IN ('failed', 'cooling')
+  AND (p.max_bound_accounts IS NULL OR COALESCE(bound.bound_count, 0) < p.max_bound_accounts)
+  AND (p.max_active_accounts IS NULL OR COALESCE(active.active_count, 0) < p.max_active_accounts)
+ORDER BY COALESCE(active.active_count, 0) ASC,
+         COALESCE(bound.bound_count, 0) ASC,
+         COALESCE(active.current_concurrency, 0) ASC,
+         COALESCE(p.failure_count, 0) ASC,
+         COALESCE(p.weight, 100) DESC,
+         p.id ASC
+LIMIT 1`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var p Proxy
+		var bound, active, concurrency int64
+		if err := rows.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.Source, &p.ProxyType, &p.Provider, &p.Region, &p.ExitIP, &p.QualityStatus, &p.MaxBoundAccounts, &p.MaxActiveAccounts, &p.Weight, &p.LastCheckedAt, &p.FailureCount, &bound, &active, &concurrency); err != nil {
+			return nil, err
+		}
+		return &p, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, infraerrors.ServiceUnavailable("NO_AVAILABLE_PROXY", "no available proxy")
+}
+
+func (s *adminServiceImpl) recordAccountProxyBinding(ctx context.Context, account *Account, proxyID int64, source, status string) error {
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" || proxyID <= 0 {
+		return nil
+	}
+	source = defaultString(source, ProxyBindingSourceAuto)
+	status = defaultString(status, ProxyBindingStatusActive)
+	_, err := s.entClient.ExecContext(ctx, `
+INSERT INTO account_proxy_bindings (identity_key, platform, account_id, proxy_id, status, source, first_used_at, last_used_at, use_count, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), 1, NOW(), NOW())
+ON CONFLICT (identity_key, proxy_id)
+DO UPDATE SET account_id = EXCLUDED.account_id,
+              platform = EXCLUDED.platform,
+              status = EXCLUDED.status,
+              source = EXCLUDED.source,
+              last_used_at = NOW(),
+              use_count = account_proxy_bindings.use_count + 1,
+              updated_at = NOW()`,
+		identityKey, account.Platform, account.ID, proxyID, status, source)
+	return err
+}
+
+func (s *adminServiceImpl) deactivateAccountProxyBindings(ctx context.Context, account *Account) error {
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return nil
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+UPDATE account_proxy_bindings
+SET status = 'inactive', updated_at = NOW()
+WHERE identity_key = $1 AND account_id = $2 AND status = 'active'`, identityKey, account.ID)
+	return err
+}
+
+func (s *adminServiceImpl) markAccountProxyBindingsDeleted(ctx context.Context, account *Account) error {
+	identityKey := accountProxyIdentityKey(account)
+	if identityKey == "" {
+		return nil
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+UPDATE account_proxy_bindings
+SET account_id = NULL, status = 'account_deleted', updated_at = NOW()
+WHERE identity_key = $1 OR account_id = $2`, identityKey, account.ID)
+	return err
+}
+
+func (s *adminServiceImpl) listProxyBindingsByIdentity(ctx context.Context, identityKey string) ([]AccountProxyBinding, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT b.id, b.identity_key, b.platform, b.account_id, b.proxy_id, b.status, b.source,
+       b.first_used_at, b.last_used_at, b.last_success_at, b.last_failure_at, b.use_count,
+       p.name, p.protocol, p.host, p.port, COALESCE(p.username, ''), COALESCE(p.password, ''), p.status, p.created_at, p.updated_at
+FROM account_proxy_bindings b
+JOIN proxies p ON p.id = b.proxy_id
+WHERE b.identity_key = $1
+ORDER BY b.last_used_at DESC, b.id DESC`, identityKey)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []AccountProxyBinding
+	for rows.Next() {
+		var b AccountProxyBinding
+		var p Proxy
+		if err := rows.Scan(&b.ID, &b.IdentityKey, &b.Platform, &b.AccountID, &b.ProxyID, &b.Status, &b.Source, &b.FirstUsedAt, &b.LastUsedAt, &b.LastSuccessAt, &b.LastFailureAt, &b.UseCount, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
+			return nil, err
+		}
+		p.ID = b.ProxyID
+		b.Proxy = &p
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+func (s *adminServiceImpl) proxyRelationshipForAccount(ctx context.Context, account *Account) (*ProxyRelationship, error) {
+	if account == nil {
+		return nil, ErrAccountNotFound
+	}
+	identityKey := accountProxyIdentityKey(account)
+	rel := &ProxyRelationship{
+		AccountID:     account.ID,
+		AccountName:   account.Name,
+		Platform:      account.Platform,
+		AccountType:   account.Type,
+		AccountStatus: account.Status,
+		IdentityKey:   identityKey,
+		ProxySource:   ProxyBindingSourceAuto,
+	}
+	if account.ProxyID == nil {
+		rel.NoAvailableProxy = true
+		return rel, nil
+	}
+	if proxy, err := s.GetProxy(ctx, *account.ProxyID); err == nil {
+		rel.CurrentProxy = proxy
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT b.id, b.status, b.source, b.last_used_at,
+       (SELECT COUNT(DISTINCT proxy_id) FROM account_proxy_bindings WHERE identity_key = $1) AS history_count,
+       (SELECT COUNT(DISTINCT identity_key) FROM account_proxy_bindings WHERE proxy_id = $2 AND status = 'active') AS bound_count,
+       (SELECT COUNT(*) FROM accounts WHERE proxy_id = $2 AND deleted_at IS NULL AND status = 'active') AS active_count,
+       (SELECT COALESCE(SUM(concurrency), 0) FROM accounts WHERE proxy_id = $2 AND deleted_at IS NULL AND status = 'active') AS current_concurrency
+FROM account_proxy_bindings b
+WHERE b.identity_key = $1 AND b.proxy_id = $2
+ORDER BY b.last_used_at DESC, b.id DESC
+LIMIT 1`, identityKey, *account.ProxyID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var bindingID int64
+		var lastUsed time.Time
+		if err := rows.Scan(&bindingID, &rel.BindingStatus, &rel.ProxySource, &lastUsed, &rel.HistoryProxyCount, &rel.BoundAccountCount, &rel.ActiveAccountCount, &rel.CurrentConcurrency); err != nil {
+			return nil, err
+		}
+		rel.BindingID = &bindingID
+		rel.LastUsedAt = &lastUsed
+	}
+	if rel.BindingStatus == "" && account.ProxyID != nil {
+		rel.BindingStatus = ProxyBindingStatusActive
+		rel.ProxySource = ProxyBindingSourceManual
+	}
+	return rel, nil
+}
+
+func parseProxyImportItems(content, provider string) []ProxyImportPreviewItem {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil
+	}
+	if strings.HasPrefix(content, "{") {
+		if items := parseSingBoxJSON(content, provider); len(items) > 0 {
+			return items
+		}
+	}
+	if strings.Contains(content, "proxies:") {
+		if items := parseClashYAML(content, provider); len(items) > 0 {
+			return items
+		}
+	}
+	lines := strings.Split(content, "\n")
+	items := make([]ProxyImportPreviewItem, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		item := parseProxyLine(line, provider)
+		items = append(items, item)
+	}
+	return dedupeImportItems(items)
+}
+
+func parseProxyLine(line, provider string) ProxyImportPreviewItem {
+	item := ProxyImportPreviewItem{Raw: line, Provider: provider, Source: "import", QualityStatus: ProxyQualityHealthy}
+	if u, err := url.Parse(line); err == nil && u.Scheme != "" {
+		scheme := strings.ToLower(u.Scheme)
+		switch scheme {
+		case "http", "https", "socks5", "socks5h":
+			port, _ := strconv.Atoi(u.Port())
+			item.Name = strings.TrimPrefix(line, scheme+"://")
+			item.Protocol = scheme
+			item.Host = u.Hostname()
+			item.Port = port
+			item.ProxyType = "direct"
+			if u.User != nil {
+				item.Username = u.User.Username()
+				item.Password, _ = u.User.Password()
+			}
+			item.Valid = item.Host != "" && item.Port > 0
+			if !item.Valid {
+				item.Error = "invalid proxy url"
+			}
+			return item
+		case "ss", "vmess", "vless", "trojan", "hysteria2", "tuic", "wireguard":
+			item.Protocol = scheme
+			item.ProxyType = "sidecar"
+			item.SidecarRequired = true
+			item.SidecarHint = "需要通过 mihomo / sing-box / xray sidecar 转成本地 http/socks5 出口"
+			item.Valid = true
+			item.Name = scheme + " node"
+			return item
+		}
+	}
+	parts := strings.Split(line, ":")
+	if len(parts) >= 2 {
+		port, err := strconv.Atoi(parts[1])
+		if err == nil {
+			item.Protocol = "http"
+			item.Host = parts[0]
+			item.Port = port
+			if len(parts) >= 4 {
+				item.Username = parts[2]
+				item.Password = strings.Join(parts[3:], ":")
+			}
+			item.Name = item.Host + ":" + strconv.Itoa(item.Port)
+			item.ProxyType = "direct"
+			item.Valid = strings.TrimSpace(item.Host) != ""
+			return item
+		}
+	}
+	item.Error = "unsupported proxy format"
+	return item
+}
+
+func parseClashYAML(content, provider string) []ProxyImportPreviewItem {
+	var root struct {
+		Proxies []map[string]any `yaml:"proxies"`
+	}
+	if err := yaml.Unmarshal([]byte(content), &root); err != nil {
+		return nil
+	}
+	items := make([]ProxyImportPreviewItem, 0, len(root.Proxies))
+	for _, p := range root.Proxies {
+		typ := strings.ToLower(fmt.Sprint(p["type"]))
+		item := ProxyImportPreviewItem{
+			Name:          strings.TrimSpace(fmt.Sprint(p["name"])),
+			Protocol:      typ,
+			Host:          strings.TrimSpace(fmt.Sprint(p["server"])),
+			Username:      strings.TrimSpace(fmt.Sprint(p["username"])),
+			Password:      strings.TrimSpace(fmt.Sprint(p["password"])),
+			Provider:      provider,
+			Source:        "clash",
+			QualityStatus: ProxyQualityHealthy,
+		}
+		item.Port, _ = strconv.Atoi(fmt.Sprint(p["port"]))
+		switch typ {
+		case "http", "https", "socks5", "socks5h":
+			item.ProxyType = "direct"
+			item.Valid = item.Host != "" && item.Port > 0
+		default:
+			item.ProxyType = "sidecar"
+			item.SidecarRequired = true
+			item.SidecarHint = "Clash/Mihomo 节点需要通过 sidecar 暴露本地 http/socks5 出口"
+			item.Valid = true
+		}
+		items = append(items, item)
+	}
+	return dedupeImportItems(items)
+}
+
+func parseSingBoxJSON(content, provider string) []ProxyImportPreviewItem {
+	var root struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal([]byte(content), &root); err != nil {
+		return nil
+	}
+	items := make([]ProxyImportPreviewItem, 0, len(root.Outbounds))
+	for _, o := range root.Outbounds {
+		typ := strings.ToLower(fmt.Sprint(o["type"]))
+		if typ == "selector" || typ == "urltest" || typ == "direct" || typ == "block" {
+			continue
+		}
+		item := ProxyImportPreviewItem{
+			Name:          strings.TrimSpace(fmt.Sprint(o["tag"])),
+			Protocol:      typ,
+			Host:          strings.TrimSpace(fmt.Sprint(o["server"])),
+			Provider:      provider,
+			Source:        "sing-box",
+			QualityStatus: ProxyQualityHealthy,
+		}
+		item.Port, _ = strconv.Atoi(fmt.Sprint(o["server_port"]))
+		switch typ {
+		case "http", "socks", "socks5":
+			item.Protocol = "socks5"
+			if typ == "http" {
+				item.Protocol = "http"
+			}
+			item.ProxyType = "direct"
+			item.Valid = item.Host != "" && item.Port > 0
+		default:
+			item.ProxyType = "sidecar"
+			item.SidecarRequired = true
+			item.SidecarHint = "sing-box 非 HTTP 原生节点需要通过 sidecar 暴露本地出口"
+			item.Valid = true
+		}
+		items = append(items, item)
+	}
+	return dedupeImportItems(items)
+}
+
+func dedupeImportItems(items []ProxyImportPreviewItem) []ProxyImportPreviewItem {
+	seen := map[string]bool{}
+	out := make([]ProxyImportPreviewItem, 0, len(items))
+	for _, item := range items {
+		key := proxyImportItemKey(item)
+		item.Key = key
+		if key != "" && seen[key] {
+			item.Duplicate = true
+			item.Selected = false
+		}
+		seen[key] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func proxyImportItemKey(item ProxyImportPreviewItem) string {
+	if item.SidecarRequired {
+		sum := sha256.Sum256([]byte(item.Raw + item.Name + item.Protocol + item.Host))
+		return "sidecar:" + hex.EncodeToString(sum[:8])
+	}
+	return strings.ToLower(fmt.Sprintf("%s://%s:%d:%s", item.Protocol, item.Host, item.Port, item.Username))
+}
+
+func looksLikeSubscriptionURL(content string) bool {
+	content = strings.TrimSpace(content)
+	return strings.HasPrefix(content, "http://") || strings.HasPrefix(content, "https://")
+}
+
+func fetchProxySubscription(ctx context.Context, rawURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("subscription fetch failed: status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func decodeMaybeBase64Subscription(content string) string {
+	compact := strings.TrimSpace(content)
+	if compact == "" || strings.Contains(compact, "\n") || strings.Contains(compact, "://") || strings.Contains(compact, "proxies:") {
+		return ""
+	}
+	data, err := base64.StdEncoding.DecodeString(compact)
+	if err != nil {
+		data, err = base64.RawStdEncoding.DecodeString(compact)
+	}
+	if err != nil {
+		return ""
+	}
+	decoded := strings.TrimSpace(string(data))
+	if decoded == "" || (!strings.Contains(decoded, "://") && !strings.Contains(decoded, "proxies:")) {
+		return ""
+	}
+	return decoded
+}
+
+func normalizeProxySubscriptionInput(input ProxySubscriptionSourceInput) ProxySubscriptionSourceInput {
+	input.Name = strings.TrimSpace(input.Name)
+	input.URL = strings.TrimSpace(input.URL)
+	input.SourceType = defaultString(input.SourceType, "clash")
+	input.Provider = strings.TrimSpace(input.Provider)
+	input.Status = defaultString(input.Status, StatusActive)
+	if input.SyncEnabled == nil {
+		v := true
+		input.SyncEnabled = &v
+	}
+	if input.SyncIntervalMinutes <= 0 {
+		input.SyncIntervalMinutes = 1440
+	}
+	return input
+}
+
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {
 	item := ProxyQualityCheckItem{
 		Target: target.Target,
@@ -3340,6 +4709,20 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		info.Region = exitInfo.Region
 		info.City = exitInfo.City
 	}
+	if s != nil && s.entClient != nil {
+		qualityStatus := normalizeProxyQualityStatus(info.QualityStatus)
+		exitIP := ""
+		region := ""
+		if exitInfo != nil {
+			exitIP = exitInfo.IP
+			region = exitInfo.Region
+		}
+		if result.FailedCount > 0 && result.PassedCount == 0 {
+			_, _ = s.entClient.ExecContext(ctx, `UPDATE proxies SET quality_status = $2, exit_ip = NULLIF($3, ''), region = NULLIF($4, ''), last_checked_at = NOW(), failure_count = failure_count + 1 WHERE id = $1`, proxyID, qualityStatus, exitIP, region)
+		} else {
+			_, _ = s.entClient.ExecContext(ctx, `UPDATE proxies SET quality_status = $2, exit_ip = NULLIF($3, ''), region = NULLIF($4, ''), last_checked_at = NOW(), failure_count = 0 WHERE id = $1`, proxyID, qualityStatus, exitIP, region)
+		}
+	}
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
@@ -3497,6 +4880,13 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) {
 	if s.proxyLatencyCache == nil || info == nil {
+		if s != nil && s.entClient != nil && info != nil {
+			status := ProxyQualityHealthy
+			if !info.Success {
+				status = ProxyQualityDegraded
+			}
+			_, _ = s.entClient.ExecContext(ctx, `UPDATE proxies SET quality_status = $2, exit_ip = NULLIF($3, ''), region = NULLIF($4, ''), last_checked_at = NOW(), failure_count = CASE WHEN $5 THEN 0 ELSE failure_count + 1 END WHERE id = $1`, proxyID, status, info.IPAddress, info.Region, info.Success)
+		}
 		return
 	}
 
@@ -3521,6 +4911,16 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 
 	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
+	}
+	if s != nil && s.entClient != nil {
+		status := ProxyQualityHealthy
+		if !merged.Success {
+			status = ProxyQualityDegraded
+		}
+		if merged.QualityStatus != "" {
+			status = normalizeProxyQualityStatus(merged.QualityStatus)
+		}
+		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxies SET quality_status = $2, exit_ip = NULLIF($3, ''), region = NULLIF($4, ''), last_checked_at = NOW(), failure_count = CASE WHEN $5 THEN 0 ELSE failure_count + 1 END WHERE id = $1`, proxyID, status, merged.IPAddress, merged.Region, merged.Success)
 	}
 }
 
