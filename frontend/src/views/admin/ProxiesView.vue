@@ -1157,7 +1157,7 @@ const handleDataImported = () => {
 }
 
 // Parse proxy URL: protocol://user:pass@host:port or protocol://host:port.
-// Provider exports often append a Clash-style "#name" fragment; URL handles it safely.
+// Provider exports often append a Clash-style "#name" fragment; strip it before parsing.
 const parseProxyUrl = (
   line: string
 ): {
@@ -1170,26 +1170,55 @@ const parseProxyUrl = (
   const trimmed = line.trim()
   if (!trimmed) return null
 
-  let parsed: URL
+  const withoutFragment = trimmed.split('#', 1)[0].trim()
+  const schemeMatch = withoutFragment.match(/^(https?|socks5h?):\/\/(.+)$/i)
+  if (!schemeMatch) return null
+
+  const protocol = schemeMatch[1].toLowerCase()
+  const authority = schemeMatch[2]
+  const atIndex = authority.lastIndexOf('@')
+  const credentials = atIndex >= 0 ? authority.slice(0, atIndex) : ''
+  const hostPort = atIndex >= 0 ? authority.slice(atIndex + 1) : authority
+
+  let host = ''
+  let port = ''
+  if (hostPort.startsWith('[')) {
+    const bracketIndex = hostPort.indexOf(']')
+    if (bracketIndex < 0 || hostPort[bracketIndex + 1] !== ':') return null
+    host = hostPort.slice(1, bracketIndex)
+    port = hostPort.slice(bracketIndex + 2)
+  } else {
+    const colonIndex = hostPort.lastIndexOf(':')
+    if (colonIndex <= 0) return null
+    host = hostPort.slice(0, colonIndex)
+    port = hostPort.slice(colonIndex + 1)
+  }
+
+  const portNum = parseInt(port, 10)
+  if (portNum < 1 || portNum > 65535) return null
+  if (!host.trim()) return null
+
+  let username = ''
+  let password = ''
+  if (credentials) {
+    const separator = credentials.indexOf(':')
+    username = separator >= 0 ? credentials.slice(0, separator) : credentials
+    password = separator >= 0 ? credentials.slice(separator + 1) : ''
+  }
+
   try {
-    parsed = new URL(trimmed)
+    username = decodeURIComponent(username).trim()
+    password = decodeURIComponent(password).trim()
   } catch {
     return null
   }
 
-  const protocol = parsed.protocol.slice(0, -1).toLowerCase()
-  if (!['http', 'https', 'socks5', 'socks5h'].includes(protocol)) return null
-
-  const portNum = parseInt(parsed.port, 10)
-  if (portNum < 1 || portNum > 65535) return null
-  if (!parsed.hostname) return null
-
   return {
     protocol: protocol as ProxyProtocol,
-    host: parsed.hostname.trim(),
+    host: host.trim(),
     port: portNum,
-    username: decodeURIComponent(parsed.username || '').trim(),
-    password: decodeURIComponent(parsed.password || '').trim()
+    username,
+    password
   }
 }
 
