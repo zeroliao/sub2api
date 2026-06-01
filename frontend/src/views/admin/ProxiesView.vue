@@ -1156,7 +1156,8 @@ const handleDataImported = () => {
   loadProxies()
 }
 
-// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port
+// Parse proxy URL: protocol://user:pass@host:port or protocol://host:port.
+// Provider exports often append a Clash-style "#name" fragment; URL handles it safely.
 const parseProxyUrl = (
   line: string
 ): {
@@ -1169,23 +1170,26 @@ const parseProxyUrl = (
   const trimmed = line.trim()
   if (!trimmed) return null
 
-  // Regex to parse proxy URL (supports http, https, socks5, socks5h)
-  const regex = /^(https?|socks5h?):\/\/(?:([^:@]+):([^@]+)@)?([^:]+):(\d+)$/i
-  const match = trimmed.match(regex)
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
 
-  if (!match) return null
+  const protocol = parsed.protocol.slice(0, -1).toLowerCase()
+  if (!['http', 'https', 'socks5', 'socks5h'].includes(protocol)) return null
 
-  const [, protocol, username, password, host, port] = match
-  const portNum = parseInt(port, 10)
-
+  const portNum = parseInt(parsed.port, 10)
   if (portNum < 1 || portNum > 65535) return null
+  if (!parsed.hostname) return null
 
   return {
-    protocol: protocol.toLowerCase() as ProxyProtocol,
-    host: host.trim(),
+    protocol: protocol as ProxyProtocol,
+    host: parsed.hostname.trim(),
     port: portNum,
-    username: username?.trim() || '',
-    password: password?.trim() || ''
+    username: decodeURIComponent(parsed.username || '').trim(),
+    password: decodeURIComponent(parsed.password || '').trim()
   }
 }
 
