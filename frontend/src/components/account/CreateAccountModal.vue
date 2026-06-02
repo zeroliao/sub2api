@@ -1124,7 +1124,13 @@
 
             <!-- Whitelist Mode -->
             <div v-if="modelRestrictionMode === 'whitelist'">
-              <ModelWhitelistSelector v-model="allowedModels" :platform="form.platform" />
+              <ModelWhitelistSelector
+                v-model="allowedModels"
+                :platform="form.platform"
+                :fill-button-label="modelFillButtonLabel"
+                :fill-loading="syncingAPIKeyModels"
+                @fill-related="handleFillAccountModels"
+              />
               <p class="text-xs text-gray-500 dark:text-gray-400">
                 {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
                 <span v-if="allowedModels.length === 0">{{
@@ -1550,7 +1556,13 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" platform="anthropic" />
+            <ModelWhitelistSelector
+              v-model="allowedModels"
+              platform="anthropic"
+              :fill-button-label="modelFillButtonLabel"
+              :fill-loading="syncingAPIKeyModels"
+              @fill-related="handleFillAccountModels"
+            />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
               <span v-if="allowedModels.length === 0">{{ t('admin.accounts.supportsAllModels') }}</span>
@@ -1789,7 +1801,13 @@
 
           <!-- Whitelist Mode -->
           <div v-if="modelRestrictionMode === 'whitelist'">
-            <ModelWhitelistSelector v-model="allowedModels" :platform="form.platform" />
+            <ModelWhitelistSelector
+              v-model="allowedModels"
+              :platform="form.platform"
+              :fill-button-label="modelFillButtonLabel"
+              :fill-loading="syncingAPIKeyModels"
+              @fill-related="handleFillAccountModels"
+            />
             <p class="text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.selectedModels', { count: allowedModels.length }) }}
               <span v-if="allowedModels.length === 0">{{
@@ -3268,6 +3286,7 @@ const modelMappings = ref<ModelMapping[]>([])
 const openAICompactModelMappings = ref<ModelMapping[]>([])
 const modelRestrictionMode = ref<'whitelist' | 'mapping'>('whitelist')
 const allowedModels = ref<string[]>([])
+const syncingAPIKeyModels = ref(false)
 const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 const MAX_POOL_MODE_RETRY_COUNT = 10
 const poolModeEnabled = ref(false)
@@ -3429,6 +3448,16 @@ const openAIWSModeConcurrencyHintKey = computed(() =>
 
 const isOpenAIModelRestrictionDisabled = computed(() =>
   form.platform === 'openai' && openaiPassthroughEnabled.value
+)
+
+const shouldFetchAPIKeyModels = computed(() =>
+  accountCategory.value === 'apikey' && ['openai', 'anthropic', 'gemini'].includes(form.platform)
+)
+
+const modelFillButtonLabel = computed(() =>
+  shouldFetchAPIKeyModels.value
+    ? t('admin.accounts.fetchAPIKeyModels')
+    : t('admin.accounts.fillRecommendedModels')
 )
 
 const mixedChannelWarningMessageText = computed(() => {
@@ -3700,12 +3729,59 @@ const handleSelectGeminiOAuthType = (oauthType: 'code_assist' | 'google_one' | '
   geminiOAuthType.value = oauthType
 }
 
+const fillRecommendedModels = () => {
+  allowedModels.value = [...getModelsByPlatform(form.platform)]
+}
+
+const handleFillAccountModels = async () => {
+  if (!shouldFetchAPIKeyModels.value) {
+    fillRecommendedModels()
+    return
+  }
+
+  const apiKey = apiKeyValue.value.trim()
+  if (!apiKey) {
+    appStore.showError(t('admin.accounts.apiKeyRequiredForModelSync'))
+    return
+  }
+
+  syncingAPIKeyModels.value = true
+  try {
+    const models = await adminAPI.accounts.previewAPIKeyModels({
+      platform: form.platform,
+      api_key: apiKey,
+      base_url: apiKeyBaseUrl.value.trim()
+    })
+    const ids = Array.from(
+      new Set(
+        models
+          .map(model => model.id?.trim())
+          .filter((id): id is string => Boolean(id))
+      )
+    )
+    if (ids.length === 0) {
+      appStore.showError(t('admin.accounts.noAPIKeyModelsReturned'))
+      return
+    }
+    allowedModels.value = ids
+    appStore.showSuccess(t('admin.accounts.apiKeyModelsSynced', { count: ids.length }))
+  } catch (error: any) {
+    appStore.showError(
+      error.response?.data?.message
+      || error.response?.data?.detail
+      || t('admin.accounts.failedToFetchAPIKeyModels')
+    )
+  } finally {
+    syncingAPIKeyModels.value = false
+  }
+}
+
 // Auto-fill related models when switching to whitelist mode or changing platform
 watch(
   [modelRestrictionMode, () => form.platform],
   ([newMode]) => {
     if (newMode === 'whitelist') {
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
+      fillRecommendedModels()
     }
   }
 )

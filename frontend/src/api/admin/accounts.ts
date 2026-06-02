@@ -446,6 +446,15 @@ export async function getAvailableModels(id: number): Promise<ClaudeModel[]> {
   return data
 }
 
+export async function previewAPIKeyModels(payload: {
+  platform: string
+  api_key: string
+  base_url?: string
+}): Promise<ClaudeModel[]> {
+  const { data } = await apiClient.post<ClaudeModel[]>('/admin/accounts/models/preview-api-key', payload)
+  return data
+}
+
 export interface CRSPreviewAccount {
   crs_account_id: string
   kind: string
@@ -660,6 +669,7 @@ export const accountsAPI = {
   resetTempUnschedulable,
   setSchedulable,
   getAvailableModels,
+  previewAPIKeyModels,
   generateAuthUrl,
   exchangeCode,
   refreshOpenAIToken,

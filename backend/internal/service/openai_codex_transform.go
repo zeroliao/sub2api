@@ -7,6 +7,7 @@ import (
 )
 
 var codexModelMap = map[string]string{
+	"codex-auto-review":          "gpt-5.5",
 	"gpt-5.5":                    "gpt-5.5",
 	"gpt-5.4":                    "gpt-5.4",
 	"gpt-5.4-mini":               "gpt-5.4-mini",

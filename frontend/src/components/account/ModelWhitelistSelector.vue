@@ -80,10 +80,11 @@
     <div class="mb-4 flex flex-wrap gap-2">
       <button
         type="button"
-        @click="fillRelated"
-        class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        @click="handleFillRelated"
+        :disabled="fillLoading"
+        class="rounded-lg border border-blue-200 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-blue-800 dark:text-blue-400 dark:hover:bg-blue-900/30"
       >
-        {{ t('admin.accounts.fillRelatedModels') }}
+        {{ fillButtonLabel || t('admin.accounts.fillRelatedModels') }}
       </button>
       <button
         type="button"
@@ -133,10 +134,13 @@ const props = defineProps<{
   modelValue: string[]
   platform?: string
   platforms?: string[]
+  fillButtonLabel?: string
+  fillLoading?: boolean
 }>()
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]]
+  fillRelated: []
 }>()
 
 const appStore = useAppStore()
@@ -227,6 +231,13 @@ const fillRelated = () => {
     }
   }
   emit('update:modelValue', newModels)
+}
+
+const handleFillRelated = () => {
+  emit('fillRelated')
+  if (!props.fillButtonLabel) {
+    fillRelated()
+  }
 }
 
 const clearAll = () => {

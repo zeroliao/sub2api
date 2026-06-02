@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -110,6 +112,12 @@ type CreateAccountRequest struct {
 	ExpiresAt               *int64         `json:"expires_at"`
 	AutoPauseOnExpired      *bool          `json:"auto_pause_on_expired"`
 	ConfirmMixedChannelRisk *bool          `json:"confirm_mixed_channel_risk"` // 用户确认混合渠道风险
+}
+
+type PreviewAPIKeyModelsRequest struct {
+	Platform string `json:"platform" binding:"required"`
+	APIKey   string `json:"api_key" binding:"required"`
+	BaseURL  string `json:"base_url"`
 }
 
 // UpdateAccountRequest represents update account request
@@ -1992,6 +2000,259 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 	}
 
 	response.Success(c, models)
+}
+
+// PreviewAPIKeyModels fetches model IDs with the API key entered in the create-account form.
+// The key is used only for this request and is not persisted.
+func (h *AccountHandler) PreviewAPIKeyModels(c *gin.Context) {
+	var req PreviewAPIKeyModelsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+
+	platform := strings.ToLower(strings.TrimSpace(req.Platform))
+	apiKey := strings.TrimSpace(req.APIKey)
+	baseURL := strings.TrimSpace(req.BaseURL)
+
+	switch platform {
+	case service.PlatformOpenAI:
+		models, err := fetchOpenAIAPIKeyModels(c.Request.Context(), apiKey, baseURL)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, models)
+	case service.PlatformAnthropic:
+		models, err := fetchAnthropicAPIKeyModels(c.Request.Context(), apiKey, baseURL)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, models)
+	case service.PlatformGemini:
+		models, err := fetchGeminiAPIKeyModels(c.Request.Context(), apiKey, baseURL)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		response.Success(c, models)
+	default:
+		response.BadRequest(c, "API key model sync is only supported for OpenAI, Anthropic, and Gemini accounts")
+	}
+}
+
+func fetchOpenAIAPIKeyModels(ctx context.Context, apiKey, baseURL string) ([]openai.Model, error) {
+	if baseURL == "" {
+		baseURL = "https://api.openai.com"
+	}
+	modelsURL, err := buildModelsListURL(baseURL, "/v1/models")
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_BASE_URL", err.Error())
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_MODELS_URL", "invalid models URL")
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	body, status, err := doModelsPreviewRequest(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, infraerrors.New(status, "FETCH_MODELS_FAILED", "upstream models endpoint returned an error")
+	}
+
+	var parsed struct {
+		Data []openai.Model `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "PARSE_MODELS_FAILED", "failed to parse upstream models response")
+	}
+	models := make([]openai.Model, 0, len(parsed.Data))
+	seen := make(map[string]struct{}, len(parsed.Data))
+	for _, model := range parsed.Data {
+		model.ID = strings.TrimSpace(model.ID)
+		if model.ID == "" {
+			continue
+		}
+		if _, ok := seen[model.ID]; ok {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		if model.Object == "" {
+			model.Object = "model"
+		}
+		if model.Type == "" {
+			model.Type = "model"
+		}
+		if model.DisplayName == "" {
+			model.DisplayName = model.ID
+		}
+		models = append(models, model)
+	}
+	if len(models) == 0 {
+		return nil, infraerrors.New(http.StatusBadGateway, "NO_MODELS_RETURNED", "upstream models endpoint returned no models")
+	}
+	return models, nil
+}
+
+func fetchAnthropicAPIKeyModels(ctx context.Context, apiKey, baseURL string) ([]claude.Model, error) {
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	modelsURL, err := buildModelsListURL(baseURL, "/v1/models")
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_BASE_URL", err.Error())
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_MODELS_URL", "invalid models URL")
+	}
+	httpReq.Header.Set("X-Api-Key", apiKey)
+	httpReq.Header.Set("Anthropic-Version", "2023-06-01")
+	httpReq.Header.Set("Accept", "application/json")
+
+	body, status, err := doModelsPreviewRequest(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, infraerrors.New(status, "FETCH_MODELS_FAILED", "upstream models endpoint returned an error")
+	}
+
+	var parsed struct {
+		Data []claude.Model `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "PARSE_MODELS_FAILED", "failed to parse upstream models response")
+	}
+	models := make([]claude.Model, 0, len(parsed.Data))
+	seen := make(map[string]struct{}, len(parsed.Data))
+	for _, model := range parsed.Data {
+		model.ID = strings.TrimSpace(model.ID)
+		if model.ID == "" {
+			continue
+		}
+		if _, ok := seen[model.ID]; ok {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		if model.Type == "" {
+			model.Type = "model"
+		}
+		if model.DisplayName == "" {
+			model.DisplayName = model.ID
+		}
+		models = append(models, model)
+	}
+	if len(models) == 0 {
+		return nil, infraerrors.New(http.StatusBadGateway, "NO_MODELS_RETURNED", "upstream models endpoint returned no models")
+	}
+	return models, nil
+}
+
+func fetchGeminiAPIKeyModels(ctx context.Context, apiKey, baseURL string) ([]geminicli.Model, error) {
+	if baseURL == "" {
+		baseURL = "https://generativelanguage.googleapis.com"
+	}
+	modelsURL, err := buildModelsListURL(baseURL, "/v1beta/models")
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_BASE_URL", err.Error())
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, modelsURL, nil)
+	if err != nil {
+		return nil, infraerrors.New(http.StatusBadRequest, "INVALID_MODELS_URL", "invalid models URL")
+	}
+	httpReq.Header.Set("X-Goog-Api-Key", apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	body, status, err := doModelsPreviewRequest(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	if status < 200 || status >= 300 {
+		return nil, infraerrors.New(status, "FETCH_MODELS_FAILED", "upstream models endpoint returned an error")
+	}
+
+	var parsed struct {
+		Models []struct {
+			Name        string `json:"name"`
+			DisplayName string `json:"displayName"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, infraerrors.New(http.StatusBadGateway, "PARSE_MODELS_FAILED", "failed to parse upstream models response")
+	}
+	models := make([]geminicli.Model, 0, len(parsed.Models))
+	seen := make(map[string]struct{}, len(parsed.Models))
+	for _, item := range parsed.Models {
+		id := strings.TrimPrefix(strings.TrimSpace(item.Name), "models/")
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		displayName := strings.TrimSpace(item.DisplayName)
+		if displayName == "" {
+			displayName = id
+		}
+		models = append(models, geminicli.Model{
+			ID:          id,
+			Type:        "model",
+			DisplayName: displayName,
+		})
+	}
+	if len(models) == 0 {
+		return nil, infraerrors.New(http.StatusBadGateway, "NO_MODELS_RETURNED", "upstream models endpoint returned no models")
+	}
+	return models, nil
+}
+
+func buildModelsListURL(baseURL, defaultPath string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return "", err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("base_url must use http or https")
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("base_url host is required")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(path, "/models") {
+		parsed.Path = path
+	} else if strings.HasSuffix(path, "/v1") || strings.HasSuffix(path, "/v1beta") {
+		parsed.Path = path + "/models"
+	} else {
+		parsed.Path = strings.TrimRight(path, "/") + defaultPath
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
+func doModelsPreviewRequest(req *http.Request) ([]byte, int, error) {
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, infraerrors.New(http.StatusBadGateway, "FETCH_MODELS_FAILED", "failed to fetch upstream models")
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	if err != nil {
+		return nil, resp.StatusCode, infraerrors.New(http.StatusBadGateway, "READ_MODELS_FAILED", "failed to read upstream models response")
+	}
+	return body, resp.StatusCode, nil
 }
 
 // SetPrivacy handles setting privacy for a single OpenAI/Antigravity OAuth account

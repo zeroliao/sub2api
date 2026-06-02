@@ -319,6 +319,25 @@ const sortTestModels = (models: ClaudeModel[]) => {
   })
 }
 
+const selectDefaultTestModel = (models: ClaudeModel[]) => {
+  if (!props.account || models.length === 0) return ''
+
+  if (props.account.platform === 'gemini') {
+    return models[0].id
+  }
+
+  if (props.account.platform === 'openai' && props.account.type === 'oauth') {
+    const stableCodexModel = models.find((m) => m.id === 'gpt-5.5')
+      || models.find((m) => m.id === 'gpt-5.4')
+      || models.find((m) => m.id.includes('codex') && !m.id.includes('spark'))
+      || models.find((m) => m.id.includes('codex'))
+    if (stableCodexModel) return stableCodexModel.id
+  }
+
+  const sonnetModel = models.find((m) => m.id.includes('sonnet'))
+  return sonnetModel?.id || models[0].id
+}
+
 // Load available models when modal opens
 watch(
   () => props.show,
@@ -352,13 +371,7 @@ const loadAvailableModels = async () => {
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.platform === 'gemini') {
-        selectedModelId.value = availableModels.value[0].id
-      } else {
-        // Try to select Sonnet as default, otherwise use first model
-        const sonnetModel = availableModels.value.find((m) => m.id.includes('sonnet'))
-        selectedModelId.value = sonnetModel?.id || availableModels.value[0].id
-      }
+      selectedModelId.value = selectDefaultTestModel(availableModels.value)
     }
   } catch (error) {
     console.error('Failed to load available models:', error)

@@ -86,6 +86,33 @@ function mountModal() {
   })
 }
 
+function mountOpenAIModal() {
+  return mount(AccountTestModal, {
+    props: {
+      show: false,
+      account: {
+        id: 43,
+        name: 'OpenAI OAuth Test',
+        platform: 'openai',
+        type: 'oauth',
+        status: 'active'
+      }
+    } as any,
+    global: {
+      stubs: {
+        BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+        Select: { template: '<div class="select-stub"></div>' },
+        TextArea: {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<textarea class="textarea-stub" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />'
+        },
+        Icon: true
+      }
+    }
+  })
+}
+
 describe('AccountTestModal', () => {
   beforeEach(() => {
     getAvailableModels.mockResolvedValue([
@@ -143,5 +170,36 @@ describe('AccountTestModal', () => {
     const preview = wrapper.find('img[alt="test-image-1"]')
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
+  })
+
+  it('OpenAI OAuth 测试默认优先选择稳定 Codex 模型', async () => {
+    getAvailableModels.mockResolvedValue([
+      { id: 'gpt-5.5', display_name: 'GPT-5.5' },
+      { id: 'gpt-5.3-codex', display_name: 'GPT-5.3 Codex' }
+    ])
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"gpt-5.5"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+
+    const wrapper = mountOpenAIModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const startButton = buttons.find((button) => button.text().includes('admin.accounts.startTest'))
+    expect(startButton).toBeTruthy()
+
+    await startButton!.trigger('click')
+    await flushPromises()
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
+    const [, request] = (global.fetch as any).mock.calls[0]
+    expect(JSON.parse(request.body)).toEqual({
+      model_id: 'gpt-5.5',
+      prompt: ''
+    })
   })
 })
