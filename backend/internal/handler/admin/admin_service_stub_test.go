@@ -657,6 +657,10 @@ func (s *stubAdminService) ScanProxySubscriptionSource(ctx context.Context, id i
 	return &service.ProxySubscriptionScanResult{SourceID: id}, nil
 }
 
+func (s *stubAdminService) GetProxySubscriptionScanStatus(ctx context.Context) (*service.ProxySubscriptionScanStatus, error) {
+	return &service.ProxySubscriptionScanStatus{}, nil
+}
+
 func (s *stubAdminService) ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]service.ProxySubscriptionNode, error) {
 	return []service.ProxySubscriptionNode{}, nil
 }

@@ -15,6 +15,7 @@ import type {
   ProxySubscriptionSource,
   ProxySubscriptionNode,
   ProxySubscriptionScanResult,
+  ProxySubscriptionScanStatus,
   CreateProxyRequest,
   UpdateProxyRequest,
   PaginatedResponse,
@@ -369,6 +370,11 @@ export async function scanProxySubscription(id: number): Promise<ProxySubscripti
   return data
 }
 
+export async function getProxySubscriptionScanStatus(): Promise<ProxySubscriptionScanStatus> {
+  const { data } = await apiClient.get<ProxySubscriptionScanStatus>('/admin/proxy-subscriptions/scan-status')
+  return data
+}
+
 export async function listProxySubscriptionNodes(id: number): Promise<ProxySubscriptionNode[]> {
   const { data } = await apiClient.get<ProxySubscriptionNode[]>(`/admin/proxy-subscriptions/${id}/nodes`)
   return data
@@ -406,6 +412,7 @@ export const proxiesAPI = {
   deleteProxySubscription,
   syncProxySubscription,
   scanProxySubscription,
+  getProxySubscriptionScanStatus,
   listProxySubscriptionNodes
 }
 

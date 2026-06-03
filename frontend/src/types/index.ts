@@ -889,6 +889,16 @@ export interface ProxySubscriptionScanResult {
   scanned_at: string
 }
 
+export interface ProxySubscriptionScanStatus {
+  active: boolean
+  source_id?: number
+  source_name?: string
+  started_at?: string | null
+  elapsed_seconds?: number
+  scan_budget_minutes?: number
+  scan_budget_max_minutes?: number
+}
+
 export interface ProxyAccountSummary {
   id: number
   name: string
