@@ -3859,6 +3859,9 @@ func (s *adminServiceImpl) DeleteProxySubscriptionSource(ctx context.Context, id
 	if s == nil || s.entClient == nil {
 		return infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
+	if err := s.retireProxySubscriptionSourceResources(ctx, id, "subscription source deleted"); err != nil {
+		return err
+	}
 	_, err := s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET deleted_at = NOW(), updated_at = NOW(), status = 'inactive' WHERE id = $1 AND deleted_at IS NULL`, id)
 	return err
 }
@@ -4465,10 +4468,13 @@ func (s *adminServiceImpl) markMissingProxySubscriptionNodes(ctx context.Context
 		if _, ok := activeKeys[node.NodeKey]; ok {
 			continue
 		}
+		if err := s.retireProxySubscriptionNodeResources(ctx, node, "subscription node missing from latest scan"); err != nil {
+			return err
+		}
 		if _, execErr := s.entClient.ExecContext(ctx, `
 UPDATE proxy_subscription_nodes
-SET status = 'missing', selected = FALSE, updated_at = NOW()
-WHERE id = $1`, node.ID); execErr != nil {
+SET status = 'missing', selected = FALSE, last_error = $2, updated_at = NOW()
+WHERE id = $1`, node.ID, "subscription node missing from latest scan"); execErr != nil {
 			return execErr
 		}
 	}
@@ -4548,6 +4554,154 @@ ON CONFLICT (node_id) WHERE deleted_at IS NULL
 DO UPDATE SET runtime = EXCLUDED.runtime, listen_port = EXCLUDED.listen_port,
               status = 'pending', updated_at = NOW()`,
 		source.ID, nodeID, defaultString(source.Runtime, "sing-box"), port)
+	return err
+}
+
+func (s *adminServiceImpl) refreshProxySidecarEndpointReadiness(ctx context.Context, nodeID, proxyID int64, port int) error {
+	endpointStatus := "pending"
+	proxyStatus := StatusDisabled
+	lastError := fmt.Sprintf("local sidecar endpoint 127.0.0.1:%d is not ready", port)
+	lastStartedAt := any(nil)
+	if isLocalTCPPortReachable(ctx, "127.0.0.1", port) {
+		endpointStatus = "ready"
+		proxyStatus = StatusActive
+		lastError = ""
+		lastStartedAt = time.Now()
+	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_sidecar_endpoints
+SET proxy_id = $2,
+    status = $3,
+    last_checked_at = NOW(),
+    last_started_at = COALESCE($4, last_started_at),
+    last_error = NULLIF($5, ''),
+    updated_at = NOW()
+WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxyID, endpointStatus, lastStartedAt, lastError); err != nil {
+		return err
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+UPDATE proxies
+SET status = $2,
+    last_checked_at = NOW(),
+    updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, proxyID, proxyStatus)
+	return err
+}
+
+func isLocalTCPPortReachable(ctx context.Context, host string, port int) bool {
+	if strings.TrimSpace(host) == "" || port <= 0 {
+		return false
+	}
+	timeout := 800 * time.Millisecond
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func (s *adminServiceImpl) retireProxySubscriptionSourceResources(ctx context.Context, sourceID int64, reason string) error {
+	nodes, err := s.ListProxySubscriptionNodes(ctx, sourceID)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if err := s.retireProxySubscriptionNodeResources(ctx, node, reason); err != nil {
+			return err
+		}
+	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_sidecar_endpoints
+SET status = 'inactive',
+    last_error = NULLIF($2, ''),
+    deleted_at = NOW(),
+    updated_at = NOW()
+WHERE source_id = $1 AND deleted_at IS NULL`, sourceID, reason); err != nil {
+		return err
+	}
+	_, err = s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_nodes
+SET status = 'inactive',
+    selected = FALSE,
+    last_error = NULLIF($2, ''),
+    deleted_at = NOW(),
+    updated_at = NOW()
+WHERE source_id = $1 AND deleted_at IS NULL`, sourceID, reason)
+	return err
+}
+
+func (s *adminServiceImpl) retireProxySubscriptionNodeResources(ctx context.Context, node ProxySubscriptionNode, reason string) error {
+	if node.SidecarRequired {
+		return s.retireSidecarProxyForSubscriptionNode(ctx, node.ID, reason)
+	}
+	item := parseProxyLine(node.RawURI, "")
+	if !item.Valid {
+		return nil
+	}
+	return s.retireDirectProxyByAddress(ctx, item.Host, item.Port, item.Username, item.Password, reason)
+}
+
+func (s *adminServiceImpl) retireSidecarProxyForSubscriptionNode(ctx context.Context, nodeID int64, reason string) error {
+	var proxyID sql.NullInt64
+	row := s.entClient.QueryRowContext(ctx, `
+SELECT proxy_id
+FROM proxy_sidecar_endpoints
+WHERE node_id = $1 AND deleted_at IS NULL
+LIMIT 1`, nodeID)
+	if err := row.Scan(&proxyID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_sidecar_endpoints
+SET status = 'inactive',
+    last_checked_at = NOW(),
+    last_error = NULLIF($2, ''),
+    updated_at = NOW()
+WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, reason); err != nil {
+		return err
+	}
+	if proxyID.Valid && proxyID.Int64 > 0 {
+		return s.retireProxyByID(ctx, proxyID.Int64, reason)
+	}
+	return nil
+}
+
+func (s *adminServiceImpl) retireDirectProxyByAddress(ctx context.Context, host string, port int, username, password, reason string) error {
+	proxy, exists, err := s.findProxyByAddress(ctx, host, port, username, password)
+	if err != nil || !exists || proxy == nil {
+		return err
+	}
+	return s.retireProxyByID(ctx, proxy.ID, reason)
+}
+
+func (s *adminServiceImpl) retireProxyByID(ctx context.Context, proxyID int64, reason string) error {
+	if proxyID <= 0 {
+		return nil
+	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxies
+SET status = $2,
+    quality_status = 'failed',
+    last_checked_at = NOW(),
+    updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, proxyID, StatusDisabled); err != nil {
+		return err
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+UPDATE account_proxy_bindings
+SET status = 'proxy_unavailable',
+    last_failure_at = NOW(),
+    last_failure_reason = NULLIF($2, ''),
+    updated_at = NOW()
+WHERE proxy_id = $1
+  AND status = 'active'`, proxyID, reason)
 	return err
 }
 
@@ -4936,16 +5090,16 @@ func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Con
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
 UPDATE proxy_sidecar_endpoints
-SET proxy_id = $2, status = 'pending', updated_at = NOW()
+SET proxy_id = $2, updated_at = NOW()
 WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
 		return err
 	}
-	return s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
+	if _, err := s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
 		Name:          proxyName,
 		Protocol:      "socks5",
 		Host:          "127.0.0.1",
 		Port:          port,
-		Status:        StatusDisabled,
+		Status:        proxy.Status,
 		Source:        "subscription",
 		ProxyType:     "sidecar",
 		Provider:      source.Provider,
@@ -4953,19 +5107,44 @@ WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
 		ExitIP:        evaluation.ExitIP,
 		QualityStatus: qualityStatus,
 		Weight:        intPtr(maxInt(1, evaluation.Score)),
-	})
+	}); err != nil {
+		return err
+	}
+	return s.refreshProxySidecarEndpointReadiness(ctx, nodeID, proxy.ID, port)
 }
 
 func (s *adminServiceImpl) findProxyByAddress(ctx context.Context, host string, port int, username, password string) (*Proxy, bool, error) {
-	proxies, err := s.GetAllProxies(ctx)
+	if s == nil || s.entClient == nil {
+		return nil, false, infraerrors.ServiceUnavailable("PROXY_UNAVAILABLE", "proxy service unavailable")
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT id, name, protocol, host, port, COALESCE(username, ''), COALESCE(password, ''),
+       status, created_at, updated_at,
+       COALESCE(source, 'manual'), COALESCE(proxy_type, 'datacenter'), COALESCE(provider, ''),
+       COALESCE(region, ''), COALESCE(exit_ip, ''), COALESCE(quality_status, 'healthy'),
+       max_bound_accounts, max_active_accounts, COALESCE(weight, 100), last_checked_at,
+       COALESCE(failure_count, 0)
+FROM proxies
+WHERE host = $1
+  AND port = $2
+  AND COALESCE(username, '') = $3
+  AND COALESCE(password, '') = $4
+  AND deleted_at IS NULL
+ORDER BY id DESC
+LIMIT 1`, host, port, username, password)
 	if err != nil {
 		return nil, false, err
 	}
-	for i := range proxies {
-		if proxies[i].Host == host && proxies[i].Port == port && proxies[i].Username == username && proxies[i].Password == password {
-			proxy := proxies[i]
-			return &proxy, true, nil
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var p Proxy
+		if err := rows.Scan(&p.ID, &p.Name, &p.Protocol, &p.Host, &p.Port, &p.Username, &p.Password, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.Source, &p.ProxyType, &p.Provider, &p.Region, &p.ExitIP, &p.QualityStatus, &p.MaxBoundAccounts, &p.MaxActiveAccounts, &p.Weight, &p.LastCheckedAt, &p.FailureCount); err != nil {
+			return nil, false, err
 		}
+		return &p, true, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
 	}
 	return nil, false, nil
 }
