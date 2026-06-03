@@ -653,6 +653,14 @@ func (s *stubAdminService) SyncProxySubscriptionSource(ctx context.Context, id i
 	return &service.ProxyImportPreview{}, nil
 }
 
+func (s *stubAdminService) ScanProxySubscriptionSource(ctx context.Context, id int64) (*service.ProxySubscriptionScanResult, error) {
+	return &service.ProxySubscriptionScanResult{SourceID: id}, nil
+}
+
+func (s *stubAdminService) ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]service.ProxySubscriptionNode, error) {
+	return []service.ProxySubscriptionNode{}, nil
+}
+
 func (s *stubAdminService) EnsureOpenAIPrivacy(ctx context.Context, account *service.Account) string {
 	return ""
 }

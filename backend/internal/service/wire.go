@@ -358,6 +358,16 @@ func ProvideScheduledTestRunnerService(
 	return svc
 }
 
+func ProvideProxySubscriptionScanRunnerService(
+	adminSvc AdminService,
+	entClient *dbent.Client,
+	cfg *config.Config,
+) *ProxySubscriptionScanRunnerService {
+	svc := NewProxySubscriptionScanRunnerService(adminSvc, entClient, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideOpsScheduledReportService creates and starts OpsScheduledReportService.
 func ProvideOpsScheduledReportService(
 	opsService *OpsService,
@@ -508,6 +518,7 @@ var ProviderSet = wire.NewSet(
 	ProvideIdempotencyCleanupService,
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
+	ProvideProxySubscriptionScanRunnerService,
 	NewGroupCapacityService,
 	NewChannelService,
 	NewModelPricingResolver,

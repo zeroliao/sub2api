@@ -758,6 +758,33 @@ export interface ProxyDispatchSettings {
   auto_assign_enabled: boolean
 }
 
+export interface ProxySubscriptionStrategy {
+  max_parsed_nodes: number
+  max_enabled_nodes: number
+  max_active_sidecar_nodes: number
+  max_probe_concurrency: number
+  scan_batch_size: number
+  standby_nodes: number
+  min_country_count: number
+  max_country_count: number
+  max_nodes_per_country: number
+  preferred_countries: string[]
+  blocked_countries: string[]
+  max_latency_ms: number
+  min_ip_clean_score: number
+  min_quality_score: number
+  selection_mode: string
+  reputation_cache_hours: number
+  scan_budget_minutes: number
+  scan_budget_max_minutes: number
+  resource_adaptive_scan: boolean
+  min_free_memory_mb: number
+  pause_free_memory_mb: number
+  timeout_sleep_after: number
+  sleep_minutes: number
+  replace_same_country_first: boolean
+}
+
 export interface ProxyImportPreviewItem {
   key: string
   name: string
@@ -798,11 +825,68 @@ export interface ProxySubscriptionSource {
   provider?: string
   sync_enabled: boolean
   sync_interval_minutes: number
+  strategy?: ProxySubscriptionStrategy
+  sidecar_enabled: boolean
+  runtime: string
+  port_start: number
+  port_end: number
+  scan_enabled: boolean
+  scan_interval_minutes: number
+  health_check_interval_minutes: number
+  reputation_provider: string
+  reputation_api_key_ref?: string
   last_synced_at?: string | null
+  last_scan_at?: string | null
+  last_scan_result?: Record<string, unknown>
   last_error?: string
   status: string
   created_at: string
   updated_at: string
+}
+
+export interface ProxySubscriptionNode {
+  id: number
+  source_id: number
+  node_key: string
+  raw_uri: string
+  name: string
+  protocol: string
+  server: string
+  port: number
+  username?: string
+  country_hint?: string
+  exit_ip?: string
+  exit_country?: string
+  exit_country_code?: string
+  latency_ms?: number
+  ip_clean_score?: number
+  reputation_provider?: string
+  reputation_checked_at?: string | null
+  score: number
+  status: string
+  failure_count: number
+  timeout_count: number
+  sleep_until?: string | null
+  last_scanned_at?: string | null
+  last_error?: string
+  selected: boolean
+  sidecar_required: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProxySubscriptionScanResult {
+  source_id: number
+  total: number
+  parsed: number
+  saved: number
+  selected: number
+  sidecar_required: number
+  direct_importable: number
+  skipped: number
+  errors?: string[]
+  strategy: ProxySubscriptionStrategy
+  scanned_at: string
 }
 
 export interface ProxyAccountSummary {

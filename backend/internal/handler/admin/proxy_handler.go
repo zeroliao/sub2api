@@ -490,6 +490,34 @@ func (h *ProxyHandler) SyncProxySubscription(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *ProxyHandler) ScanProxySubscription(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	result, err := h.adminService.ScanProxySubscriptionSource(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProxyHandler) ListProxySubscriptionNodes(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid subscription ID")
+		return
+	}
+	result, err := h.adminService.ListProxySubscriptionNodes(c.Request.Context(), id)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 // GetStats handles getting proxy statistics
 // GET /api/v1/admin/proxies/:id/stats
 func (h *ProxyHandler) GetStats(c *gin.Context) {

@@ -11,11 +11,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -125,6 +130,8 @@ type AdminService interface {
 	UpdateProxySubscriptionSource(ctx context.Context, id int64, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error)
 	DeleteProxySubscriptionSource(ctx context.Context, id int64) error
 	SyncProxySubscriptionSource(ctx context.Context, id int64) (*ProxyImportPreview, error)
+	ScanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error)
+	ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]ProxySubscriptionNode, error)
 
 	// Redeem code management
 	ListRedeemCodes(ctx context.Context, page, pageSize int, codeType, status, search string, sortBy, sortOrder string) ([]RedeemCode, int64, error)
@@ -534,7 +541,19 @@ type ProxySubscriptionSource struct {
 	Provider            string     `json:"provider,omitempty"`
 	SyncEnabled         bool       `json:"sync_enabled"`
 	SyncIntervalMinutes int        `json:"sync_interval_minutes"`
+	Strategy            ProxySubscriptionStrategy `json:"strategy"`
+	SidecarEnabled      bool       `json:"sidecar_enabled"`
+	Runtime             string     `json:"runtime"`
+	PortStart           int        `json:"port_start"`
+	PortEnd             int        `json:"port_end"`
+	ScanEnabled         bool       `json:"scan_enabled"`
+	ScanIntervalMinutes int        `json:"scan_interval_minutes"`
+	HealthCheckIntervalMinutes int  `json:"health_check_interval_minutes"`
+	ReputationProvider  string     `json:"reputation_provider"`
+	ReputationAPIKeyRef string     `json:"reputation_api_key_ref,omitempty"`
 	LastSyncedAt        *time.Time `json:"last_synced_at,omitempty"`
+	LastScanAt          *time.Time `json:"last_scan_at,omitempty"`
+	LastScanResult      map[string]any `json:"last_scan_result,omitempty"`
 	LastError           string     `json:"last_error,omitempty"`
 	Status              string     `json:"status"`
 	CreatedAt           time.Time  `json:"created_at"`
@@ -548,7 +567,118 @@ type ProxySubscriptionSourceInput struct {
 	Provider            string `json:"provider"`
 	SyncEnabled         *bool  `json:"sync_enabled"`
 	SyncIntervalMinutes int    `json:"sync_interval_minutes"`
+	Strategy            ProxySubscriptionStrategy `json:"strategy"`
+	SidecarEnabled      *bool  `json:"sidecar_enabled"`
+	Runtime             string `json:"runtime"`
+	PortStart           int    `json:"port_start"`
+	PortEnd             int    `json:"port_end"`
+	ScanEnabled         *bool  `json:"scan_enabled"`
+	ScanIntervalMinutes int    `json:"scan_interval_minutes"`
+	HealthCheckIntervalMinutes int `json:"health_check_interval_minutes"`
+	ReputationProvider  string `json:"reputation_provider"`
+	ReputationAPIKeyRef string `json:"reputation_api_key_ref"`
 	Status              string `json:"status"`
+}
+
+type ProxySubscriptionStrategy struct {
+	MaxParsedNodes        int      `json:"max_parsed_nodes"`
+	MaxEnabledNodes       int      `json:"max_enabled_nodes"`
+	MaxActiveSidecarNodes int      `json:"max_active_sidecar_nodes"`
+	MaxProbeConcurrency   int      `json:"max_probe_concurrency"`
+	ScanBatchSize         int      `json:"scan_batch_size"`
+	StandbyNodes          int      `json:"standby_nodes"`
+	MinCountryCount       int      `json:"min_country_count"`
+	MaxCountryCount       int      `json:"max_country_count"`
+	MaxNodesPerCountry    int      `json:"max_nodes_per_country"`
+	PreferredCountries    []string `json:"preferred_countries"`
+	BlockedCountries      []string `json:"blocked_countries"`
+	MaxLatencyMs          int      `json:"max_latency_ms"`
+	MinIPCleanScore       int      `json:"min_ip_clean_score"`
+	MinQualityScore       int      `json:"min_quality_score"`
+	SelectionMode         string   `json:"selection_mode"`
+	ReputationCacheHours  int      `json:"reputation_cache_hours"`
+	ScanBudgetMinutes     int      `json:"scan_budget_minutes"`
+	ScanBudgetMaxMinutes  int      `json:"scan_budget_max_minutes"`
+	ResourceAdaptiveScan  bool     `json:"resource_adaptive_scan"`
+	MinFreeMemoryMB       int      `json:"min_free_memory_mb"`
+	PauseFreeMemoryMB     int      `json:"pause_free_memory_mb"`
+	TimeoutSleepAfter     int      `json:"timeout_sleep_after"`
+	SleepMinutes          int      `json:"sleep_minutes"`
+	ReplaceSameCountryFirst bool   `json:"replace_same_country_first"`
+}
+
+type ProxySubscriptionNode struct {
+	ID                  int64      `json:"id"`
+	SourceID            int64      `json:"source_id"`
+	NodeKey             string     `json:"node_key"`
+	RawURI              string     `json:"raw_uri"`
+	Name                string     `json:"name"`
+	Protocol            string     `json:"protocol"`
+	Server              string     `json:"server"`
+	Port                int        `json:"port"`
+	Username            string     `json:"username,omitempty"`
+	CountryHint         string     `json:"country_hint,omitempty"`
+	ExitIP              string     `json:"exit_ip,omitempty"`
+	ExitCountry         string     `json:"exit_country,omitempty"`
+	ExitCountryCode     string     `json:"exit_country_code,omitempty"`
+	LatencyMs           *int       `json:"latency_ms,omitempty"`
+	IPCleanScore        *int       `json:"ip_clean_score,omitempty"`
+	ReputationProvider  string     `json:"reputation_provider,omitempty"`
+	ReputationCheckedAt *time.Time `json:"reputation_checked_at,omitempty"`
+	Score               int        `json:"score"`
+	Status              string     `json:"status"`
+	FailureCount        int        `json:"failure_count"`
+	TimeoutCount        int        `json:"timeout_count"`
+	SleepUntil          *time.Time `json:"sleep_until,omitempty"`
+	LastScannedAt       *time.Time `json:"last_scanned_at,omitempty"`
+	LastError           string     `json:"last_error,omitempty"`
+	Selected            bool       `json:"selected"`
+	SidecarRequired     bool       `json:"sidecar_required"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+type ProxySubscriptionScanResult struct {
+	SourceID         int64  `json:"source_id"`
+	Total           int    `json:"total"`
+	Parsed          int    `json:"parsed"`
+	Saved           int    `json:"saved"`
+	Selected        int    `json:"selected"`
+	SidecarRequired int    `json:"sidecar_required"`
+	DirectImportable int   `json:"direct_importable"`
+	Skipped         int    `json:"skipped"`
+	Errors          []string `json:"errors,omitempty"`
+	Strategy        ProxySubscriptionStrategy `json:"strategy"`
+	ScannedAt       time.Time `json:"scanned_at"`
+}
+
+type proxySubscriptionNodeEvaluation struct {
+	Key                 string
+	Country             string
+	ExitIP              string
+	ExitCountry         string
+	ExitCountryCode     string
+	LatencyMs           *int
+	IPCleanScore        *int
+	ReputationProvider  string
+	ReputationCheckedAt *time.Time
+	ReputationRaw       map[string]any
+	FailureCount        int
+	TimeoutCount        int
+	SleepUntil          *time.Time
+	TimedOut            bool
+	Score               int
+	LastError           string
+}
+
+type proxyIPReputationResult struct {
+	IP          string
+	CleanScore  int
+	Country     string
+	CountryCode string
+	Provider    string
+	CheckedAt   time.Time
+	Raw         map[string]any
 }
 
 type GenerateRedeemCodesInput struct {
@@ -691,6 +821,9 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
+	scanStateMu          sync.Mutex
+	scanActive           bool
+	scanActiveSourceID   int64
 }
 
 type userGroupRateBatchReader interface {
@@ -3594,7 +3727,10 @@ func (s *adminServiceImpl) ListProxySubscriptionSources(ctx context.Context) ([]
 	}
 	rows, err := s.entClient.QueryContext(ctx, `
 SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-       last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at
+       COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+       scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
+       COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
+       COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at
 FROM proxy_subscription_sources
 WHERE deleted_at IS NULL
 ORDER BY id DESC`)
@@ -3605,9 +3741,18 @@ ORDER BY id DESC`)
 	var out []ProxySubscriptionSource
 	for rows.Next() {
 		var item ProxySubscriptionSource
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var strategyRaw, scanResultRaw string
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes,
+			&strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd,
+			&item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider,
+			&item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw,
+			&item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
+		item.LastScanResult = parseJSONMap(scanResultRaw)
 		out = append(out, item)
 	}
 	return out, rows.Err()
@@ -3618,21 +3763,44 @@ func (s *adminServiceImpl) CreateProxySubscriptionSource(ctx context.Context, in
 		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
 	input = normalizeProxySubscriptionInput(input)
+	strategyRaw, err := json.Marshal(input.Strategy)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.entClient.QueryContext(ctx, `
-INSERT INTO proxy_subscription_sources (name, url, source_type, provider, sync_enabled, sync_interval_minutes, status, created_at, updated_at)
-VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, NOW(), NOW())
+INSERT INTO proxy_subscription_sources (
+  name, url, source_type, provider, sync_enabled, sync_interval_minutes,
+  strategy_json, sidecar_enabled, runtime, port_start, port_end, scan_enabled,
+  scan_interval_minutes, health_check_interval_minutes, reputation_provider,
+  reputation_api_key_ref, status, created_at, updated_at
+)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, NULLIF($16, ''), $17, NOW(), NOW())
 RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-          last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at`,
-		input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.Status)
+          COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+          scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
+          COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
+          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`,
+		input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes,
+		string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled,
+		input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	if rows.Next() {
 		var item ProxySubscriptionSource
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var strategyRaw, scanResultRaw string
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes,
+			&strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd,
+			&item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider,
+			&item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw,
+			&item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
+		item.LastScanResult = parseJSONMap(scanResultRaw)
 		return &item, nil
 	}
 	return nil, rows.Err()
@@ -3643,23 +3811,45 @@ func (s *adminServiceImpl) UpdateProxySubscriptionSource(ctx context.Context, id
 		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
 	input = normalizeProxySubscriptionInput(input)
+	strategyRaw, err := json.Marshal(input.Strategy)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := s.entClient.QueryContext(ctx, `
 UPDATE proxy_subscription_sources
 SET name = $2, url = $3, source_type = $4, provider = NULLIF($5, ''),
-    sync_enabled = $6, sync_interval_minutes = $7, status = $8, updated_at = NOW()
+    sync_enabled = $6, sync_interval_minutes = $7, strategy_json = $8::jsonb,
+    sidecar_enabled = $9, runtime = $10, port_start = $11, port_end = $12,
+    scan_enabled = $13, scan_interval_minutes = $14, health_check_interval_minutes = $15,
+    reputation_provider = $16, reputation_api_key_ref = NULLIF($17, ''), status = $18,
+    updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-          last_synced_at, COALESCE(last_error, ''), status, created_at, updated_at`,
-		id, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.Status)
+          COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+          scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
+          COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
+          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`,
+		id, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes,
+		string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled,
+		input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	if rows.Next() {
 		var item ProxySubscriptionSource
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.LastSyncedAt, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		var strategyRaw, scanResultRaw string
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes,
+			&strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd,
+			&item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider,
+			&item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw,
+			&item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
+		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
+		item.LastScanResult = parseJSONMap(scanResultRaw)
 		return &item, nil
 	}
 	return nil, ErrProxyNotFound
@@ -3697,6 +3887,1087 @@ func (s *adminServiceImpl) SyncProxySubscriptionSource(ctx context.Context, id i
 	}
 	_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_synced_at = NOW(), last_error = NULLIF($2, ''), updated_at = NOW() WHERE id = $1`, id, lastErr)
 	return preview, err
+}
+
+func (s *adminServiceImpl) ScanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	if err := s.tryStartProxySubscriptionScan(id); err != nil {
+		return nil, err
+	}
+	defer s.finishProxySubscriptionScan()
+
+	source, err := s.getProxySubscriptionSourceForScan(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	strategy := normalizeProxySubscriptionStrategy(source.Strategy)
+	scanTimeout := time.Duration(strategy.ScanBudgetMaxMinutes) * time.Minute
+	if scanTimeout <= 0 {
+		scanTimeout = 40 * time.Minute
+	}
+	scanCtx, cancel := context.WithTimeout(ctx, scanTimeout)
+	defer cancel()
+
+	preview, err := s.PreviewProxyImport(scanCtx, ProxyImportPreviewInput{URL: source.URL, Provider: source.Provider})
+	if err != nil {
+		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_scan_at = NOW(), last_error = $2, updated_at = NOW() WHERE id = $1`, id, err.Error())
+		return nil, err
+	}
+	items := preview.Items
+	if strategy.MaxParsedNodes > 0 && len(items) > strategy.MaxParsedNodes {
+		items = items[:strategy.MaxParsedNodes]
+	}
+	existingNodes, err := s.loadProxySubscriptionNodeState(scanCtx, id)
+	if err != nil {
+		return nil, err
+	}
+	evaluations := s.evaluateProxySubscriptionItems(scanCtx, source, items, strategy, existingNodes)
+	selectedStatuses := selectProxySubscriptionItems(items, source, strategy, evaluations)
+	result := &ProxySubscriptionScanResult{
+		SourceID:  id,
+		Total:     preview.Total,
+		Parsed:    len(items),
+		Strategy:  strategy,
+		ScannedAt: time.Now(),
+	}
+
+	sidecarIndex := 0
+	activeKeys := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if scanCtx.Err() != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("scan budget reached: %v", scanCtx.Err()))
+			break
+		}
+		if !item.Valid {
+			result.Skipped++
+			if item.Error != "" {
+				result.Errors = append(result.Errors, item.Error)
+			}
+			continue
+		}
+		key := item.Key
+		if key == "" {
+			key = proxyImportItemKey(item)
+		}
+		activeKeys[key] = struct{}{}
+		eval, ok := evaluations[key]
+		if !ok {
+			eval = proxySubscriptionNodeEvaluation{
+				Key:     key,
+				Country: inferProxySubscriptionCountry(item),
+			}
+		}
+		status := defaultString(selectedStatuses[key], "candidate")
+		if item.SidecarRequired && !source.SidecarEnabled {
+			status = "sidecar_disabled"
+		}
+		if eval.SleepUntil != nil && eval.SleepUntil.After(result.ScannedAt) {
+			status = "sleeping"
+		}
+		if eval.TimedOut && status == "candidate" {
+			status = "timeout"
+		}
+		if eval.LastError != "" && status == "candidate" {
+			status = "degraded"
+		}
+		isSelected := status == "selected"
+		nodeID, err := s.upsertProxySubscriptionNode(scanCtx, id, item, key, eval, status, isSelected)
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+			continue
+		}
+		result.Saved++
+		if isSelected {
+			result.Selected++
+		}
+		if item.SidecarRequired {
+			result.SidecarRequired++
+			if isSelected && source.SidecarEnabled && sidecarIndex < strategy.MaxActiveSidecarNodes {
+				port := source.PortStart + sidecarIndex
+				if port <= source.PortEnd {
+					if err := s.reserveProxySidecarEndpoint(scanCtx, source, nodeID, port); err != nil {
+						result.Errors = append(result.Errors, err.Error())
+					} else {
+						if err := s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
+							result.Errors = append(result.Errors, err.Error())
+						}
+						sidecarIndex++
+					}
+				}
+			}
+		} else {
+			result.DirectImportable++
+			if isSelected {
+				if err := s.upsertDirectProxyFromSubscriptionNode(scanCtx, source, item, eval); err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				}
+			}
+		}
+	}
+	if scanCtx.Err() == nil {
+		if err := s.markMissingProxySubscriptionNodes(scanCtx, id, activeKeys); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		}
+	} else {
+		result.Errors = append(result.Errors, "scan finished before all nodes were processed, missing-node cleanup skipped")
+	}
+	if err := s.saveProxySubscriptionScanResult(scanCtx, id, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *adminServiceImpl) ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]ProxySubscriptionNode, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT id, source_id, node_key, raw_uri, name, protocol, server, port, COALESCE(username, ''),
+       COALESCE(country_hint, ''), COALESCE(exit_ip, ''), COALESCE(exit_country, ''),
+       COALESCE(exit_country_code, ''), latency_ms, ip_clean_score, COALESCE(reputation_provider, ''),
+       reputation_checked_at, score, status, failure_count, timeout_count, sleep_until,
+       last_scanned_at, COALESCE(last_error, ''), selected, sidecar_required, created_at, updated_at
+FROM proxy_subscription_nodes
+WHERE source_id = $1 AND deleted_at IS NULL
+ORDER BY selected DESC, score DESC, id ASC`, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var nodes []ProxySubscriptionNode
+	for rows.Next() {
+		var n ProxySubscriptionNode
+		if err := rows.Scan(
+			&n.ID, &n.SourceID, &n.NodeKey, &n.RawURI, &n.Name, &n.Protocol, &n.Server, &n.Port, &n.Username,
+			&n.CountryHint, &n.ExitIP, &n.ExitCountry, &n.ExitCountryCode, &n.LatencyMs, &n.IPCleanScore,
+			&n.ReputationProvider, &n.ReputationCheckedAt, &n.Score, &n.Status, &n.FailureCount, &n.TimeoutCount,
+			&n.SleepUntil, &n.LastScannedAt, &n.LastError, &n.Selected, &n.SidecarRequired, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, n)
+	}
+	return nodes, rows.Err()
+}
+
+func (s *adminServiceImpl) getProxySubscriptionSourceForScan(ctx context.Context, id int64) (*ProxySubscriptionSource, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
+       COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+       scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
+       COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
+       COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at
+FROM proxy_subscription_sources
+WHERE id = $1 AND deleted_at IS NULL`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, ErrProxyNotFound
+	}
+	var item ProxySubscriptionSource
+	var strategyRaw, scanResultRaw string
+	if err := rows.Scan(
+		&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes,
+		&strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd,
+		&item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider,
+		&item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw,
+		&item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
+	item.LastScanResult = parseJSONMap(scanResultRaw)
+	return &item, rows.Err()
+}
+
+func (s *adminServiceImpl) tryStartProxySubscriptionScan(sourceID int64) error {
+	s.scanStateMu.Lock()
+	defer s.scanStateMu.Unlock()
+	if s.scanActive {
+		if s.scanActiveSourceID == sourceID {
+			return infraerrors.Conflict("PROXY_SUBSCRIPTION_SCAN_BUSY", "proxy subscription scan is already running for this source")
+		}
+		return infraerrors.Conflict("PROXY_SUBSCRIPTION_SCAN_BUSY", "another proxy subscription scan is already running")
+	}
+	s.scanActive = true
+	s.scanActiveSourceID = sourceID
+	return nil
+}
+
+func (s *adminServiceImpl) finishProxySubscriptionScan() {
+	s.scanStateMu.Lock()
+	defer s.scanStateMu.Unlock()
+	s.scanActive = false
+	s.scanActiveSourceID = 0
+}
+
+func (s *adminServiceImpl) loadProxySubscriptionNodeState(ctx context.Context, sourceID int64) (map[string]ProxySubscriptionNode, error) {
+	nodes, err := s.ListProxySubscriptionNodes(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ProxySubscriptionNode, len(nodes))
+	for i := range nodes {
+		out[nodes[i].NodeKey] = nodes[i]
+	}
+	return out, nil
+}
+
+func (s *adminServiceImpl) evaluateProxySubscriptionItems(ctx context.Context, source *ProxySubscriptionSource, items []ProxyImportPreviewItem, strategy ProxySubscriptionStrategy, existing map[string]ProxySubscriptionNode) map[string]proxySubscriptionNodeEvaluation {
+	evaluations := make(map[string]proxySubscriptionNodeEvaluation, len(items))
+	batchPause := proxySubscriptionBatchPause(strategy, len(items))
+	for idx, item := range items {
+		if idx > 0 && strategy.ScanBatchSize > 0 && idx%strategy.ScanBatchSize == 0 && batchPause > 0 {
+			timer := time.NewTimer(batchPause)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return evaluations
+			case <-timer.C:
+			}
+		}
+
+		key := item.Key
+		if key == "" {
+			key = proxyImportItemKey(item)
+		}
+		eval := proxySubscriptionNodeEvaluation{
+			Key:     key,
+			Country: inferProxySubscriptionCountry(item),
+		}
+		if previous, ok := existing[key]; ok {
+			eval.FailureCount = previous.FailureCount
+			eval.TimeoutCount = previous.TimeoutCount
+			if previous.SleepUntil != nil && previous.SleepUntil.After(time.Now()) {
+				eval.SleepUntil = previous.SleepUntil
+			}
+		}
+		if latencyMs, timedOut, probeErr := s.measureProxySubscriptionNodeLatency(ctx, item, strategy); probeErr != nil {
+			eval.TimedOut = timedOut
+			eval.FailureCount++
+			if timedOut {
+				eval.TimeoutCount++
+			}
+			eval.LastError = probeErr.Error()
+		} else {
+			eval.LatencyMs = latencyMs
+			eval.FailureCount = 0
+			eval.TimeoutCount = 0
+			eval.SleepUntil = nil
+		}
+		if strategy.TimeoutSleepAfter > 0 && eval.TimeoutCount >= strategy.TimeoutSleepAfter {
+			sleepUntil := time.Now().Add(time.Duration(strategy.SleepMinutes) * time.Minute)
+			eval.SleepUntil = &sleepUntil
+			eval.LastError = fmt.Sprintf("node timed out %d times, sleeping until %s", eval.TimeoutCount, sleepUntil.Format(time.RFC3339))
+		}
+		if source != nil && source.ReputationProvider != "" && source.ReputationProvider != "none" {
+			reputation, err := s.lookupProxySubscriptionNodeReputation(ctx, source, item.Host, strategy.ReputationCacheHours)
+			if err != nil {
+				if eval.LastError == "" {
+					eval.LastError = err.Error()
+				}
+			} else if reputation != nil {
+				eval.ExitIP = reputation.IP
+				eval.ExitCountry = reputation.Country
+				eval.ExitCountryCode = reputation.CountryCode
+				eval.ReputationProvider = reputation.Provider
+				eval.ReputationCheckedAt = &reputation.CheckedAt
+				eval.ReputationRaw = reputation.Raw
+				eval.IPCleanScore = &reputation.CleanScore
+				if eval.Country == "" {
+					eval.Country = defaultString(reputation.CountryCode, reputation.Country)
+				}
+			}
+		}
+		eval.Score = scoreProxySubscriptionItem(item, strategy, eval.IPCleanScore, eval.LatencyMs)
+		evaluations[key] = eval
+	}
+	return evaluations
+}
+
+func selectProxySubscriptionItems(items []ProxyImportPreviewItem, source *ProxySubscriptionSource, strategy ProxySubscriptionStrategy, evaluations map[string]proxySubscriptionNodeEvaluation) map[string]string {
+	strategy = normalizeProxySubscriptionStrategy(strategy)
+	type candidate struct {
+		key     string
+		item    ProxyImportPreviewItem
+		score   int
+		country string
+	}
+	candidates := make([]candidate, 0, len(items))
+	for _, item := range items {
+		if !item.Valid || item.Duplicate {
+			continue
+		}
+		key := item.Key
+		if key == "" {
+			key = proxyImportItemKey(item)
+		}
+		eval, ok := evaluations[key]
+		if !ok {
+			eval = proxySubscriptionNodeEvaluation{
+				Key:     key,
+				Country: inferProxySubscriptionCountry(item),
+				Score:   scoreProxySubscriptionItem(item, strategy, nil, nil),
+			}
+		}
+		if source != nil && item.SidecarRequired && !source.SidecarEnabled {
+			continue
+		}
+		if eval.SleepUntil != nil && eval.SleepUntil.After(time.Now()) {
+			continue
+		}
+		if strategy.MinIPCleanScore > 0 && (eval.IPCleanScore == nil || *eval.IPCleanScore < strategy.MinIPCleanScore) {
+			continue
+		}
+		if strategy.MinQualityScore > 0 && eval.Score < strategy.MinQualityScore {
+			continue
+		}
+		if strategy.MaxLatencyMs > 0 && eval.LatencyMs != nil && *eval.LatencyMs > strategy.MaxLatencyMs {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			key:     key,
+			item:    item,
+			score:   eval.Score,
+			country: defaultString(eval.Country, inferProxySubscriptionCountry(item)),
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score == candidates[j].score {
+			return candidates[i].key < candidates[j].key
+		}
+		return candidates[i].score > candidates[j].score
+	})
+	statuses := map[string]string{}
+	perCountry := map[string]int{}
+	countryCount := 0
+	selectedCount := 0
+	normalizeCountry := func(country string) string {
+		if country == "" {
+			country = "unknown"
+		}
+		return country
+	}
+	canSelect := func(country string) bool {
+		if isCountryBlocked(country, strategy.BlockedCountries) {
+			return false
+		}
+		if strategy.MaxNodesPerCountry > 0 && perCountry[country] >= strategy.MaxNodesPerCountry {
+			return false
+		}
+		if perCountry[country] == 0 && strategy.MaxCountryCount > 0 && countryCount >= strategy.MaxCountryCount {
+			return false
+		}
+		return true
+	}
+	selectCandidate := func(c candidate) bool {
+		if selectedCount >= strategy.MaxEnabledNodes {
+			return false
+		}
+		country := normalizeCountry(c.country)
+		if !canSelect(country) {
+			return false
+		}
+		statuses[c.key] = "selected"
+		if perCountry[country] == 0 {
+			countryCount++
+		}
+		perCountry[country]++
+		selectedCount++
+		return true
+	}
+	if strategy.MinCountryCount > 1 {
+		for _, c := range candidates {
+			country := normalizeCountry(c.country)
+			if perCountry[country] > 0 {
+				continue
+			}
+			if selectedCount >= strategy.MinCountryCount {
+				break
+			}
+			selectCandidate(c)
+		}
+	}
+	for _, c := range candidates {
+		if selectedCount >= strategy.MaxEnabledNodes {
+			break
+		}
+		if statuses[c.key] == "selected" {
+			continue
+		}
+		selectCandidate(c)
+	}
+	standbyCount := 0
+	appendStandby := func(c candidate) {
+		if standbyCount >= strategy.StandbyNodes {
+			return
+		}
+		if statuses[c.key] != "" {
+			return
+		}
+		statuses[c.key] = "standby"
+		standbyCount++
+	}
+	if strategy.ReplaceSameCountryFirst {
+		for _, c := range candidates {
+			country := normalizeCountry(c.country)
+			if perCountry[country] == 0 {
+				continue
+			}
+			appendStandby(c)
+			if standbyCount >= strategy.StandbyNodes {
+				break
+			}
+		}
+	}
+	for _, c := range candidates {
+		if standbyCount >= strategy.StandbyNodes {
+			break
+		}
+		appendStandby(c)
+	}
+	return statuses
+}
+
+func scoreProxySubscriptionItem(item ProxyImportPreviewItem, strategy ProxySubscriptionStrategy, cleanScore *int, latencyMs *int) int {
+	score := 60
+	if !item.SidecarRequired {
+		score += 10
+	}
+	country := inferProxySubscriptionCountry(item)
+	if isCountryPreferred(country, strategy.PreferredCountries) {
+		score += 15
+	}
+	if strings.Contains(strings.ToLower(item.Name), "direct") || strings.Contains(item.Name, "直连") {
+		score += 5
+	}
+	if item.Protocol == "anytls" {
+		score += 3
+	}
+	if cleanScore != nil {
+		score += (*cleanScore - 50) / 5
+	}
+	if latencyMs != nil {
+		switch {
+		case *latencyMs <= 300:
+			score += 12
+		case *latencyMs <= 800:
+			score += 6
+		case *latencyMs <= 1500:
+			score += 1
+		default:
+			score -= minInt((*latencyMs-1500)/120, 25)
+		}
+	}
+	if score > 100 {
+		return 100
+	}
+	if score < 0 {
+		return 0
+	}
+	return score
+}
+
+func inferProxySubscriptionCountry(item ProxyImportPreviewItem) string {
+	text := " " + strings.ToLower(strings.Join([]string{item.Name, item.Region, item.Host}, " ")) + " "
+	switch {
+	case strings.Contains(text, "美国") || strings.Contains(text, "united states") || strings.Contains(text, " usa ") || strings.Contains(text, " us "):
+		return "US"
+	case strings.Contains(text, "日本") || strings.Contains(text, " japan ") || strings.Contains(text, " jp "):
+		return "JP"
+	case strings.Contains(text, "新加坡") || strings.Contains(text, " singapore ") || strings.Contains(text, " sg "):
+		return "SG"
+	case strings.Contains(text, "香港") || strings.Contains(text, " hong kong ") || strings.Contains(text, " hk "):
+		return "HK"
+	case strings.Contains(text, "台湾") || strings.Contains(text, " taiwan ") || strings.Contains(text, " tw "):
+		return "TW"
+	default:
+		return ""
+	}
+}
+
+func isCountryPreferred(country string, preferred []string) bool {
+	country = strings.ToUpper(strings.TrimSpace(country))
+	for _, item := range preferred {
+		if country == strings.ToUpper(strings.TrimSpace(item)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCountryBlocked(country string, blocked []string) bool {
+	country = strings.ToUpper(strings.TrimSpace(country))
+	for _, item := range blocked {
+		if country == strings.ToUpper(strings.TrimSpace(item)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *adminServiceImpl) upsertProxySubscriptionNode(ctx context.Context, sourceID int64, item ProxyImportPreviewItem, key string, evaluation proxySubscriptionNodeEvaluation, status string, selected bool) (int64, error) {
+	raw := strings.TrimSpace(item.Raw)
+	if raw == "" {
+		raw = strings.TrimSpace(item.Name)
+	}
+	countryHint := defaultString(evaluation.Country, inferProxySubscriptionCountry(item))
+	reputationRaw, _ := json.Marshal(evaluation.ReputationRaw)
+	rows, err := s.entClient.QueryContext(ctx, `
+INSERT INTO proxy_subscription_nodes (
+  source_id, node_key, raw_uri, name, protocol, server, port, username,
+  country_hint, exit_ip, exit_country, exit_country_code, ip_clean_score, reputation_provider,
+  reputation_checked_at, reputation_raw, latency_ms, score, status, failure_count, timeout_count,
+  sleep_until, selected, sidecar_required, last_error, last_scanned_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), NULLIF($11, ''), NULLIF($12, ''),
+        $13, NULLIF($14, ''), $15, $16::jsonb, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW(), NOW())
+ON CONFLICT (source_id, node_key) WHERE deleted_at IS NULL
+DO UPDATE SET raw_uri = EXCLUDED.raw_uri, name = EXCLUDED.name, protocol = EXCLUDED.protocol,
+              server = EXCLUDED.server, port = EXCLUDED.port, username = EXCLUDED.username,
+              country_hint = EXCLUDED.country_hint, exit_ip = EXCLUDED.exit_ip, exit_country = EXCLUDED.exit_country,
+              exit_country_code = EXCLUDED.exit_country_code, ip_clean_score = EXCLUDED.ip_clean_score,
+              reputation_provider = EXCLUDED.reputation_provider, reputation_checked_at = EXCLUDED.reputation_checked_at,
+              reputation_raw = EXCLUDED.reputation_raw, latency_ms = EXCLUDED.latency_ms, score = EXCLUDED.score,
+              status = EXCLUDED.status, failure_count = EXCLUDED.failure_count, timeout_count = EXCLUDED.timeout_count,
+              sleep_until = EXCLUDED.sleep_until, selected = EXCLUDED.selected, sidecar_required = EXCLUDED.sidecar_required,
+              last_scanned_at = NOW(), last_error = EXCLUDED.last_error, updated_at = NOW()
+RETURNING id`,
+		sourceID, key, raw, item.Name, item.Protocol, item.Host, item.Port, item.Username,
+		countryHint, evaluation.ExitIP, evaluation.ExitCountry, evaluation.ExitCountryCode, evaluation.IPCleanScore,
+		nullIfBlank(evaluation.ReputationProvider), evaluation.ReputationCheckedAt, string(reputationRaw), evaluation.LatencyMs,
+		evaluation.Score, status, evaluation.FailureCount, evaluation.TimeoutCount, evaluation.SleepUntil, selected,
+		item.SidecarRequired, nullIfBlank(evaluation.LastError))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	}
+	return 0, rows.Err()
+}
+
+func (s *adminServiceImpl) markMissingProxySubscriptionNodes(ctx context.Context, sourceID int64, activeKeys map[string]struct{}) error {
+	nodes, err := s.ListProxySubscriptionNodes(ctx, sourceID)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if _, ok := activeKeys[node.NodeKey]; ok {
+			continue
+		}
+		if _, execErr := s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_nodes
+SET status = 'missing', selected = FALSE, updated_at = NOW()
+WHERE id = $1`, node.ID); execErr != nil {
+			return execErr
+		}
+	}
+	return nil
+}
+
+func proxySubscriptionBatchPause(strategy ProxySubscriptionStrategy, totalItems int) time.Duration {
+	if !strategy.ResourceAdaptiveScan {
+		return 0
+	}
+	base := 3 * time.Second
+	switch {
+	case strategy.PauseFreeMemoryMB >= 768:
+		base = 12 * time.Second
+	case strategy.MinFreeMemoryMB >= 1024:
+		base = 6 * time.Second
+	}
+	if totalItems <= 0 || strategy.ScanBatchSize <= 0 || strategy.ScanBudgetMinutes <= 0 {
+		return base
+	}
+	batchCount := (totalItems + strategy.ScanBatchSize - 1) / strategy.ScanBatchSize
+	if batchCount <= 1 {
+		return base
+	}
+	targetPause := time.Duration(strategy.ScanBudgetMinutes) * time.Minute / time.Duration(batchCount) / 3
+	if targetPause < base {
+		return base
+	}
+	if targetPause > 20*time.Second {
+		return 20 * time.Second
+	}
+	return targetPause
+}
+
+func (s *adminServiceImpl) measureProxySubscriptionNodeLatency(ctx context.Context, item ProxyImportPreviewItem, strategy ProxySubscriptionStrategy) (*int, bool, error) {
+	host := strings.TrimSpace(item.Host)
+	if host == "" || item.Port <= 0 {
+		return nil, false, nil
+	}
+	switch strings.ToLower(strings.TrimSpace(item.Protocol)) {
+	case "tuic", "hysteria2", "wireguard":
+		return nil, false, nil
+	}
+	timeout := 5 * time.Second
+	if strategy.MaxLatencyMs > 0 {
+		timeout = time.Duration(strategy.MaxLatencyMs) * time.Millisecond
+		if timeout < 800*time.Millisecond {
+			timeout = 800 * time.Millisecond
+		}
+		if timeout > 5*time.Second {
+			timeout = 5 * time.Second
+		}
+	}
+	dialer := net.Dialer{Timeout: timeout}
+	start := time.Now()
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(host, strconv.Itoa(item.Port)))
+	if err != nil {
+		timedOut := errors.Is(err, context.DeadlineExceeded)
+		if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+			timedOut = true
+		}
+		return nil, timedOut, fmt.Errorf("latency probe failed for %s:%d: %w", host, item.Port, err)
+	}
+	latency := int(time.Since(start).Milliseconds())
+	_ = conn.Close()
+	return &latency, false, nil
+}
+
+func (s *adminServiceImpl) reserveProxySidecarEndpoint(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, port int) error {
+	if source == nil {
+		return nil
+	}
+	_, err := s.entClient.ExecContext(ctx, `
+INSERT INTO proxy_sidecar_endpoints (source_id, node_id, runtime, listen_host, listen_port, protocol, status, updated_at)
+VALUES ($1, $2, $3, '127.0.0.1', $4, 'socks5', 'pending', NOW())
+ON CONFLICT (node_id) WHERE deleted_at IS NULL
+DO UPDATE SET runtime = EXCLUDED.runtime, listen_port = EXCLUDED.listen_port,
+              status = 'pending', updated_at = NOW()`,
+		source.ID, nodeID, defaultString(source.Runtime, "sing-box"), port)
+	return err
+}
+
+func (s *adminServiceImpl) saveProxySubscriptionScanResult(ctx context.Context, id int64, result *ProxySubscriptionScanResult) error {
+	if result == nil {
+		return nil
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	_, err = s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_sources
+SET last_scan_at = NOW(), last_scan_result = $2::jsonb, last_error = NULL, updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, id, string(raw))
+	return err
+}
+
+func (s *adminServiceImpl) lookupProxySubscriptionNodeReputation(ctx context.Context, source *ProxySubscriptionSource, host string, cacheHours int) (*proxyIPReputationResult, error) {
+	if s == nil || s.entClient == nil || source == nil {
+		return nil, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(source.ReputationProvider))
+	if provider == "" || provider == "none" {
+		return nil, nil
+	}
+	ipAddress, err := resolveProxySubscriptionHostIP(ctx, host)
+	if err != nil {
+		return nil, fmt.Errorf("resolve node host %q failed: %w", host, err)
+	}
+	if ipAddress == "" {
+		return nil, fmt.Errorf("no IP resolved for host %q", host)
+	}
+	cached, err := s.getCachedProxyIPReputation(ctx, ipAddress, provider)
+	if err == nil && cached != nil {
+		return cached, nil
+	}
+
+	apiKey, err := resolveProxySubscriptionAPIKey(source.ReputationAPIKeyRef)
+	if err != nil {
+		return nil, err
+	}
+
+	var result *proxyIPReputationResult
+	switch provider {
+	case "abuseipdb":
+		result, err = fetchAbuseIPDBReputation(ctx, apiKey, ipAddress)
+	default:
+		return nil, fmt.Errorf("unsupported reputation provider: %s", provider)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		if cacheHours <= 0 {
+			cacheHours = 24
+		}
+		result.Provider = provider
+		_ = s.saveCachedProxyIPReputation(ctx, result, cacheHours)
+	}
+	return result, nil
+}
+
+func resolveProxySubscriptionHostIP(ctx context.Context, host string) (string, error) {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return "", errors.New("empty host")
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return parsed.String(), nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	for _, addr := range addrs {
+		if ipv4 := addr.IP.To4(); ipv4 != nil {
+			return ipv4.String(), nil
+		}
+	}
+	if len(addrs) > 0 {
+		return addrs[0].IP.String(), nil
+	}
+	return "", errors.New("host resolved to no IPs")
+}
+
+func resolveProxySubscriptionAPIKey(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		if value := strings.TrimSpace(os.Getenv("ABUSEIPDB_API_KEY")); value != "" {
+			return value, nil
+		}
+		ref = "keymd:AbuseIPDB API Key"
+	}
+	switch {
+	case strings.HasPrefix(strings.ToLower(ref), "env:"):
+		key := strings.TrimSpace(ref[4:])
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			return "", fmt.Errorf("environment variable %s is empty", key)
+		}
+		return value, nil
+	case strings.HasPrefix(strings.ToLower(ref), "literal:"):
+		value := strings.TrimSpace(ref[len("literal:"):])
+		if value == "" {
+			return "", errors.New("literal API key is empty")
+		}
+		return value, nil
+	case strings.HasPrefix(strings.ToLower(ref), "keymd:"):
+		label := strings.TrimSpace(ref[len("keymd:"):])
+		return readAPIKeyFromMarkdown(label)
+	default:
+		return strings.TrimSpace(ref), nil
+	}
+}
+
+func readAPIKeyFromMarkdown(label string) (string, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return "", errors.New("empty key label")
+	}
+	pattern := regexp.MustCompile(`(?im)^\s*` + regexp.QuoteMeta(label) + `\s*:\s*(.+?)\s*$`)
+	for _, candidate := range findProxySubscriptionKeyMarkdownCandidates() {
+		content, err := os.ReadFile(candidate)
+		if err != nil {
+			continue
+		}
+		matches := pattern.FindSubmatch(content)
+		if len(matches) < 2 {
+			continue
+		}
+		value := strings.TrimSpace(string(matches[1]))
+		if value != "" {
+			return value, nil
+		}
+	}
+	return "", fmt.Errorf("unable to resolve API key label %q from key.md", label)
+}
+
+func findProxySubscriptionKeyMarkdownCandidates() []string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return []string{"key.md", filepath.Join("sub2api", "key.md")}
+	}
+	seen := map[string]struct{}{}
+	paths := make([]string, 0, 12)
+	current := wd
+	for i := 0; i < 5; i++ {
+		for _, candidate := range []string{
+			filepath.Join(current, "key.md"),
+			filepath.Join(current, "sub2api", "key.md"),
+			filepath.Join(current, "..", "sub2api", "key.md"),
+		} {
+			candidate = filepath.Clean(candidate)
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			paths = append(paths, candidate)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+		current = parent
+	}
+	return paths
+}
+
+func fetchAbuseIPDBReputation(ctx context.Context, apiKey, ipAddress string) (*proxyIPReputationResult, error) {
+	client, err := httpclient.GetClient(httpclient.Options{
+		Timeout:               15 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.abuseipdb.com/api/v2/check", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := req.URL.Query()
+	query.Set("ipAddress", ipAddress)
+	query.Set("maxAgeInDays", "90")
+	query.Set("verbose", "")
+	req.URL.RawQuery = query.Encode()
+	req.Header.Set("Key", apiKey)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", proxyQualityClientUserAgent)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("AbuseIPDB returned HTTP %d", resp.StatusCode)
+	}
+	var payload struct {
+		Data struct {
+			IPAddress            string `json:"ipAddress"`
+			AbuseConfidenceScore int    `json:"abuseConfidenceScore"`
+			CountryCode          string `json:"countryCode"`
+			CountryName          string `json:"countryName"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, err
+	}
+	raw := map[string]any{}
+	_ = json.Unmarshal(body, &raw)
+	cleanScore := 100 - payload.Data.AbuseConfidenceScore
+	if cleanScore < 0 {
+		cleanScore = 0
+	}
+	if cleanScore > 100 {
+		cleanScore = 100
+	}
+	return &proxyIPReputationResult{
+		IP:          defaultString(payload.Data.IPAddress, ipAddress),
+		CleanScore:  cleanScore,
+		Country:     payload.Data.CountryName,
+		CountryCode: payload.Data.CountryCode,
+		Provider:    "abuseipdb",
+		CheckedAt:   time.Now(),
+		Raw:         raw,
+	}, nil
+}
+
+func (s *adminServiceImpl) getCachedProxyIPReputation(ctx context.Context, ipAddress, provider string) (*proxyIPReputationResult, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT clean_score, raw::text, checked_at
+FROM proxy_ip_reputation_cache
+WHERE ip = $1 AND provider = $2 AND expires_at > NOW()`, ipAddress, provider)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	var result proxyIPReputationResult
+	var rawText string
+	if err := rows.Scan(&result.CleanScore, &rawText, &result.CheckedAt); err != nil {
+		return nil, err
+	}
+	result.IP = ipAddress
+	result.Provider = provider
+	result.Raw = parseJSONMap(rawText)
+	if data, ok := result.Raw["data"].(map[string]any); ok {
+		if country, ok := data["countryName"].(string); ok {
+			result.Country = country
+		}
+		if code, ok := data["countryCode"].(string); ok {
+			result.CountryCode = code
+		}
+	}
+	return &result, nil
+}
+
+func (s *adminServiceImpl) saveCachedProxyIPReputation(ctx context.Context, result *proxyIPReputationResult, cacheHours int) error {
+	if s == nil || s.entClient == nil || result == nil {
+		return nil
+	}
+	if cacheHours <= 0 {
+		cacheHours = 24
+	}
+	raw, err := json.Marshal(result.Raw)
+	if err != nil {
+		return err
+	}
+	_, err = s.entClient.ExecContext(ctx, `
+INSERT INTO proxy_ip_reputation_cache (ip, provider, clean_score, raw, checked_at, expires_at)
+VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+ON CONFLICT (ip, provider)
+DO UPDATE SET clean_score = EXCLUDED.clean_score, raw = EXCLUDED.raw, checked_at = EXCLUDED.checked_at, expires_at = EXCLUDED.expires_at`,
+		result.IP, result.Provider, result.CleanScore, string(raw), result.CheckedAt, result.CheckedAt.Add(time.Duration(cacheHours)*time.Hour))
+	return err
+}
+
+func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation) error {
+	proxy, exists, err := s.findProxyByAddress(ctx, item.Host, item.Port, item.Username, item.Password)
+	if err != nil {
+		return err
+	}
+	qualityStatus := ProxyQualityHealthy
+	if (evaluation.IPCleanScore != nil && *evaluation.IPCleanScore < 50) ||
+		evaluation.LastError != "" ||
+		(evaluation.LatencyMs != nil && *evaluation.LatencyMs > 1500) {
+		qualityStatus = ProxyQualityDegraded
+	}
+	name := strings.TrimSpace(item.Name)
+	if name == "" {
+		name = fmt.Sprintf("%s:%d", item.Host, item.Port)
+	}
+	if !exists {
+		_, err := s.CreateProxy(ctx, &CreateProxyInput{
+			Name:          name,
+			Protocol:      item.Protocol,
+			Host:          item.Host,
+			Port:          item.Port,
+			Username:      item.Username,
+			Password:      item.Password,
+			Source:        "subscription",
+			ProxyType:     defaultString(item.ProxyType, "datacenter"),
+			Provider:      source.Provider,
+			Region:        defaultString(evaluation.ExitCountryCode, evaluation.Country),
+			ExitIP:        evaluation.ExitIP,
+			QualityStatus: qualityStatus,
+			Weight:        maxInt(1, evaluation.Score),
+		})
+		return err
+	}
+	proxy.Name = name
+	proxy.Protocol = item.Protocol
+	proxy.Host = item.Host
+	proxy.Port = item.Port
+	proxy.Username = item.Username
+	proxy.Password = item.Password
+	proxy.Status = StatusActive
+	applyProxyUpdateMetadata(proxy, &UpdateProxyInput{
+		Source:        "subscription",
+		ProxyType:     defaultString(item.ProxyType, "datacenter"),
+		Provider:      source.Provider,
+		Region:        defaultString(evaluation.ExitCountryCode, evaluation.Country),
+		ExitIP:        evaluation.ExitIP,
+		QualityStatus: qualityStatus,
+		Weight:        intPtr(maxInt(1, evaluation.Score)),
+	})
+	return s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
+		Name:          proxy.Name,
+		Protocol:      proxy.Protocol,
+		Host:          proxy.Host,
+		Port:          proxy.Port,
+		Username:      proxy.Username,
+		Password:      proxy.Password,
+		Status:        StatusActive,
+		Source:        proxy.Source,
+		ProxyType:     proxy.ProxyType,
+		Provider:      proxy.Provider,
+		Region:        proxy.Region,
+		ExitIP:        proxy.ExitIP,
+		QualityStatus: proxy.QualityStatus,
+		Weight:        intPtr(proxy.Weight),
+	})
+}
+
+func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation, port int) error {
+	proxyName := strings.TrimSpace(item.Name)
+	if proxyName == "" {
+		proxyName = fmt.Sprintf("%s:%d", item.Host, item.Port)
+	}
+	proxyName = fmt.Sprintf("%s / %s", source.Name, proxyName)
+	qualityStatus := ProxyQualityDegraded
+	if evaluation.LastError == "" && evaluation.LatencyMs != nil && *evaluation.LatencyMs <= 1500 {
+		qualityStatus = ProxyQualityHealthy
+	}
+	proxy, exists, err := s.findProxyByAddress(ctx, "127.0.0.1", port, "", "")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		proxy, err = s.CreateProxy(ctx, &CreateProxyInput{
+			Name:          proxyName,
+			Protocol:      "socks5",
+			Host:          "127.0.0.1",
+			Port:          port,
+			Source:        "subscription",
+			ProxyType:     "sidecar",
+			Provider:      source.Provider,
+			Region:        defaultString(evaluation.ExitCountryCode, evaluation.Country),
+			QualityStatus: qualityStatus,
+			Weight:        maxInt(1, evaluation.Score),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if proxy == nil {
+		return errors.New("sidecar proxy create returned nil proxy")
+	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_sidecar_endpoints
+SET proxy_id = $2, status = 'pending', updated_at = NOW()
+WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
+		return err
+	}
+	return s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
+		Name:          proxyName,
+		Protocol:      "socks5",
+		Host:          "127.0.0.1",
+		Port:          port,
+		Status:        StatusDisabled,
+		Source:        "subscription",
+		ProxyType:     "sidecar",
+		Provider:      source.Provider,
+		Region:        defaultString(evaluation.ExitCountryCode, evaluation.Country),
+		ExitIP:        evaluation.ExitIP,
+		QualityStatus: qualityStatus,
+		Weight:        intPtr(maxInt(1, evaluation.Score)),
+	})
+}
+
+func (s *adminServiceImpl) findProxyByAddress(ctx context.Context, host string, port int, username, password string) (*Proxy, bool, error) {
+	proxies, err := s.GetAllProxies(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range proxies {
+		if proxies[i].Host == host && proxies[i].Port == port && proxies[i].Username == username && proxies[i].Password == password {
+			proxy := proxies[i]
+			return &proxy, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 // Redeem code management implementations
@@ -3977,6 +5248,32 @@ func defaultString(value, fallback string) string {
 	return value
 }
 
+func nullIfBlank(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func normalizeProxyQualityStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case ProxyQualityDegraded, "warn", "warning", "challenge":
@@ -4082,13 +5379,13 @@ WHERE id = $1`,
 		normalizeProxyQualityStatus(proxy.QualityStatus),
 		proxy.MaxBoundAccounts,
 		proxy.MaxActiveAccounts,
-		maxInt(proxy.Weight, 100),
+		positiveOrDefaultInt(proxy.Weight, 100),
 		proxy.FailureCount,
 	)
 	return err
 }
 
-func maxInt(v, fallback int) int {
+func positiveOrDefaultInt(v, fallback int) int {
 	if v <= 0 {
 		return fallback
 	}
@@ -4559,13 +5856,21 @@ func parseProxyLine(line, provider string) ProxyImportPreviewItem {
 				item.Error = "invalid proxy url"
 			}
 			return item
-		case "ss", "vmess", "vless", "trojan", "hysteria2", "tuic", "wireguard":
+		case "ss", "vmess", "vless", "trojan", "hysteria2", "tuic", "wireguard", "anytls":
 			item.Protocol = scheme
+			item.Host = u.Hostname()
+			item.Port, _ = strconv.Atoi(u.Port())
+			if u.User != nil {
+				item.Username = u.User.Username()
+			}
 			item.ProxyType = "sidecar"
 			item.SidecarRequired = true
 			item.SidecarHint = "需要通过 mihomo / sing-box / xray sidecar 转成本地 http/socks5 出口"
 			item.Valid = true
-			item.Name = scheme + " node"
+			item.Name = strings.TrimSpace(u.Fragment)
+			if item.Name == "" {
+				item.Name = scheme + " node"
+			}
 			return item
 		}
 	}
@@ -4697,23 +6002,47 @@ func looksLikeSubscriptionURL(content string) bool {
 }
 
 func fetchProxySubscription(ctx context.Context, rawURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSpace(rawURL), nil)
-	if err != nil {
-		return "", err
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_REQUIRED", "subscription URL is required")
 	}
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
+	if err != nil {
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
+	}
+	req.Header.Set("User-Agent", proxyQualityClientUserAgent)
+	req.Header.Set("Accept", "*/*")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		if errors.Is(err, context.DeadlineExceeded) || subscriptionFetchTimedOut(err) {
+			return "", infraerrors.GatewayTimeout("PROXY_SUBSCRIPTION_FETCH_TIMEOUT", "subscription request timed out").WithCause(err)
+		}
+		return "", infraerrors.BadRequest(
+			"PROXY_SUBSCRIPTION_FETCH_FAILED",
+			subscriptionFetchErrorMessage(parsedURL.Host, err),
+		).WithCause(err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("subscription fetch failed: status %d", resp.StatusCode)
+		return "", infraerrors.BadRequest(
+			"PROXY_SUBSCRIPTION_FETCH_FAILED",
+			fmt.Sprintf("subscription URL returned HTTP %d", resp.StatusCode),
+		)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if err != nil {
-		return "", err
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "failed to read subscription response").WithCause(err)
 	}
-	return string(data), nil
+	body := string(data)
+	if strings.TrimSpace(body) == "" {
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "subscription response is empty")
+	}
+	return body, nil
 }
 
 func decodeMaybeBase64Subscription(content string) string {
@@ -4741,14 +6070,197 @@ func normalizeProxySubscriptionInput(input ProxySubscriptionSourceInput) ProxySu
 	input.SourceType = defaultString(input.SourceType, "clash")
 	input.Provider = strings.TrimSpace(input.Provider)
 	input.Status = defaultString(input.Status, StatusActive)
+	input.Runtime = defaultString(input.Runtime, "sing-box")
+	input.ReputationProvider = defaultString(input.ReputationProvider, "none")
 	if input.SyncEnabled == nil {
 		v := true
 		input.SyncEnabled = &v
 	}
+	if input.SidecarEnabled == nil {
+		v := false
+		input.SidecarEnabled = &v
+	}
+	if input.ScanEnabled == nil {
+		v := true
+		input.ScanEnabled = &v
+	}
 	if input.SyncIntervalMinutes <= 0 {
 		input.SyncIntervalMinutes = 1440
 	}
+	if input.PortStart <= 0 {
+		input.PortStart = 31000
+	}
+	if input.PortEnd < input.PortStart {
+		input.PortEnd = input.PortStart + 999
+	}
+	if input.ScanIntervalMinutes <= 0 {
+		input.ScanIntervalMinutes = 360
+	}
+	if input.HealthCheckIntervalMinutes <= 0 {
+		input.HealthCheckIntervalMinutes = 20
+	}
+	input.Strategy = normalizeProxySubscriptionStrategy(input.Strategy)
 	return input
+}
+
+func defaultProxySubscriptionStrategy() ProxySubscriptionStrategy {
+	return ProxySubscriptionStrategy{
+		MaxParsedNodes:          300,
+		MaxEnabledNodes:         30,
+		MaxActiveSidecarNodes:   3,
+		MaxProbeConcurrency:     1,
+		ScanBatchSize:           5,
+		StandbyNodes:            10,
+		MinCountryCount:         3,
+		MaxCountryCount:         8,
+		MaxNodesPerCountry:      5,
+		MaxLatencyMs:            1200,
+		MinIPCleanScore:         70,
+		MinQualityScore:         65,
+		SelectionMode:           "balanced",
+		ReputationCacheHours:    24,
+		ScanBudgetMinutes:       30,
+		ScanBudgetMaxMinutes:    40,
+		ResourceAdaptiveScan:    true,
+		MinFreeMemoryMB:         800,
+		PauseFreeMemoryMB:       500,
+		TimeoutSleepAfter:       3,
+		SleepMinutes:            60,
+		ReplaceSameCountryFirst: true,
+	}
+}
+
+func normalizeProxySubscriptionStrategy(strategy ProxySubscriptionStrategy) ProxySubscriptionStrategy {
+	defaults := defaultProxySubscriptionStrategy()
+	if strategy.MaxParsedNodes <= 0 {
+		strategy.MaxParsedNodes = defaults.MaxParsedNodes
+	}
+	if strategy.MaxEnabledNodes <= 0 {
+		strategy.MaxEnabledNodes = defaults.MaxEnabledNodes
+	}
+	if strategy.MaxActiveSidecarNodes <= 0 {
+		strategy.MaxActiveSidecarNodes = defaults.MaxActiveSidecarNodes
+	}
+	if strategy.MaxProbeConcurrency <= 0 {
+		strategy.MaxProbeConcurrency = defaults.MaxProbeConcurrency
+	}
+	if strategy.ScanBatchSize <= 0 {
+		strategy.ScanBatchSize = defaults.ScanBatchSize
+	}
+	if strategy.StandbyNodes < 0 {
+		strategy.StandbyNodes = defaults.StandbyNodes
+	}
+	if strategy.MinCountryCount <= 0 {
+		strategy.MinCountryCount = defaults.MinCountryCount
+	}
+	if strategy.MaxCountryCount <= 0 {
+		strategy.MaxCountryCount = defaults.MaxCountryCount
+	}
+	if strategy.MaxNodesPerCountry <= 0 {
+		strategy.MaxNodesPerCountry = defaults.MaxNodesPerCountry
+	}
+	if strategy.MaxLatencyMs <= 0 {
+		strategy.MaxLatencyMs = defaults.MaxLatencyMs
+	}
+	if strategy.MinIPCleanScore <= 0 {
+		strategy.MinIPCleanScore = defaults.MinIPCleanScore
+	}
+	if strategy.MinQualityScore <= 0 {
+		strategy.MinQualityScore = defaults.MinQualityScore
+	}
+	if strings.TrimSpace(strategy.SelectionMode) == "" {
+		strategy.SelectionMode = defaults.SelectionMode
+	}
+	if strategy.ReputationCacheHours <= 0 {
+		strategy.ReputationCacheHours = defaults.ReputationCacheHours
+	}
+	if strategy.ScanBudgetMinutes <= 0 {
+		strategy.ScanBudgetMinutes = defaults.ScanBudgetMinutes
+	}
+	if strategy.ScanBudgetMaxMinutes < strategy.ScanBudgetMinutes {
+		strategy.ScanBudgetMaxMinutes = maxInt(defaults.ScanBudgetMaxMinutes, strategy.ScanBudgetMinutes)
+	}
+	if strategy.MinFreeMemoryMB <= 0 {
+		strategy.MinFreeMemoryMB = defaults.MinFreeMemoryMB
+	}
+	if strategy.PauseFreeMemoryMB <= 0 {
+		strategy.PauseFreeMemoryMB = defaults.PauseFreeMemoryMB
+	}
+	if strategy.PauseFreeMemoryMB >= strategy.MinFreeMemoryMB {
+		strategy.MinFreeMemoryMB = maxInt(strategy.PauseFreeMemoryMB+128, defaults.MinFreeMemoryMB)
+	}
+	if strategy.TimeoutSleepAfter <= 0 {
+		strategy.TimeoutSleepAfter = defaults.TimeoutSleepAfter
+	}
+	if strategy.SleepMinutes <= 0 {
+		strategy.SleepMinutes = defaults.SleepMinutes
+	}
+	return strategy
+}
+
+func parseProxySubscriptionStrategy(raw string) ProxySubscriptionStrategy {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return defaultProxySubscriptionStrategy()
+	}
+	if raw == "{}" {
+		return defaultProxySubscriptionStrategy()
+	}
+	var strategy ProxySubscriptionStrategy
+	if err := json.Unmarshal([]byte(raw), &strategy); err != nil {
+		return defaultProxySubscriptionStrategy()
+	}
+	normalized := normalizeProxySubscriptionStrategy(strategy)
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &rawMap); err == nil {
+		if _, ok := rawMap["resource_adaptive_scan"]; !ok {
+			normalized.ResourceAdaptiveScan = defaultProxySubscriptionStrategy().ResourceAdaptiveScan
+		}
+		if _, ok := rawMap["replace_same_country_first"]; !ok {
+			normalized.ReplaceSameCountryFirst = defaultProxySubscriptionStrategy().ReplaceSameCountryFirst
+		}
+	}
+	return normalized
+}
+
+func parseJSONMap(raw string) map[string]any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return map[string]any{}
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+func subscriptionFetchTimedOut(err error) bool {
+	type timeoutError interface {
+		Timeout() bool
+	}
+	var timeoutErr timeoutError
+	return errors.As(err, &timeoutErr) && timeoutErr.Timeout()
+}
+
+func subscriptionFetchErrorMessage(host string, err error) string {
+	message := "failed to fetch subscription URL"
+	if host != "" {
+		message = fmt.Sprintf("failed to fetch subscription URL from %s", host)
+	}
+	if err == nil {
+		return message
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) && urlErr.Err != nil {
+		err = urlErr.Err
+	}
+	detail := strings.TrimSpace(err.Error())
+	if detail == "" {
+		return message
+	}
+	return fmt.Sprintf("%s: %s", message, detail)
 }
 
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {

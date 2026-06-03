@@ -13,6 +13,8 @@ import type {
   ProxyRelationship,
   ProxyQualityCheckResult,
   ProxySubscriptionSource,
+  ProxySubscriptionNode,
+  ProxySubscriptionScanResult,
   CreateProxyRequest,
   UpdateProxyRequest,
   PaginatedResponse,
@@ -362,6 +364,16 @@ export async function syncProxySubscription(id: number): Promise<ProxyImportPrev
   return data
 }
 
+export async function scanProxySubscription(id: number): Promise<ProxySubscriptionScanResult> {
+  const { data } = await apiClient.post<ProxySubscriptionScanResult>(`/admin/proxy-subscriptions/${id}/scan`)
+  return data
+}
+
+export async function listProxySubscriptionNodes(id: number): Promise<ProxySubscriptionNode[]> {
+  const { data } = await apiClient.get<ProxySubscriptionNode[]>(`/admin/proxy-subscriptions/${id}/nodes`)
+  return data
+}
+
 export const proxiesAPI = {
   list,
   getAll,
@@ -392,7 +404,9 @@ export const proxiesAPI = {
   createProxySubscription,
   updateProxySubscription,
   deleteProxySubscription,
-  syncProxySubscription
+  syncProxySubscription,
+  scanProxySubscription,
+  listProxySubscriptionNodes
 }
 
 export default proxiesAPI
