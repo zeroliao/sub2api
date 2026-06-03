@@ -4650,12 +4650,21 @@ func (s *adminServiceImpl) retireProxySubscriptionNodeResources(ctx context.Cont
 
 func (s *adminServiceImpl) retireSidecarProxyForSubscriptionNode(ctx context.Context, nodeID int64, reason string) error {
 	var proxyID sql.NullInt64
-	row := s.entClient.QueryRowContext(ctx, `
+	rows, err := s.entClient.QueryContext(ctx, `
 SELECT proxy_id
 FROM proxy_sidecar_endpoints
 WHERE node_id = $1 AND deleted_at IS NULL
 LIMIT 1`, nodeID)
-	if err := row.Scan(&proxyID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		if err := rows.Scan(&proxyID); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
 		return err
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
@@ -5036,7 +5045,7 @@ func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Con
 		QualityStatus: qualityStatus,
 		Weight:        intPtr(maxInt(1, evaluation.Score)),
 	})
-	return s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
+	_, err = s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
 		Name:          proxy.Name,
 		Protocol:      proxy.Protocol,
 		Host:          proxy.Host,
@@ -5052,6 +5061,7 @@ func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Con
 		QualityStatus: proxy.QualityStatus,
 		Weight:        intPtr(proxy.Weight),
 	})
+	return err
 }
 
 func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation, port int) error {
@@ -5433,10 +5443,6 @@ func nullIfBlank(value string) any {
 		return nil
 	}
 	return value
-}
-
-func intPtr(value int) *int {
-	return &value
 }
 
 func maxInt(a, b int) int {
