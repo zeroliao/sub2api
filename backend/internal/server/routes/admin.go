@@ -411,6 +411,7 @@ func registerProxySubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers
 	{
 		subscriptions.GET("", h.Admin.Proxy.ListProxySubscriptions)
 		subscriptions.POST("", h.Admin.Proxy.CreateProxySubscription)
+		subscriptions.GET("/scan-status", h.Admin.Proxy.GetProxySubscriptionScanStatus)
 		subscriptions.PUT("/:id", h.Admin.Proxy.UpdateProxySubscription)
 		subscriptions.DELETE("/:id", h.Admin.Proxy.DeleteProxySubscription)
 		subscriptions.POST("/:id/sync", h.Admin.Proxy.SyncProxySubscription)

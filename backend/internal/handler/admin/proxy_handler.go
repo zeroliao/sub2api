@@ -504,6 +504,15 @@ func (h *ProxyHandler) ScanProxySubscription(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *ProxyHandler) GetProxySubscriptionScanStatus(c *gin.Context) {
+	result, err := h.adminService.GetProxySubscriptionScanStatus(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *ProxyHandler) ListProxySubscriptionNodes(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

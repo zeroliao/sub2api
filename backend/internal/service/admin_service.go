@@ -131,6 +131,7 @@ type AdminService interface {
 	DeleteProxySubscriptionSource(ctx context.Context, id int64) error
 	SyncProxySubscriptionSource(ctx context.Context, id int64) (*ProxyImportPreview, error)
 	ScanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error)
+	GetProxySubscriptionScanStatus(ctx context.Context) (*ProxySubscriptionScanStatus, error)
 	ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]ProxySubscriptionNode, error)
 
 	// Redeem code management
@@ -652,6 +653,16 @@ type ProxySubscriptionScanResult struct {
 	ScannedAt       time.Time `json:"scanned_at"`
 }
 
+type ProxySubscriptionScanStatus struct {
+	Active               bool       `json:"active"`
+	SourceID             int64      `json:"source_id,omitempty"`
+	SourceName           string     `json:"source_name,omitempty"`
+	StartedAt            *time.Time `json:"started_at,omitempty"`
+	ElapsedSeconds       int        `json:"elapsed_seconds,omitempty"`
+	ScanBudgetMinutes    int        `json:"scan_budget_minutes,omitempty"`
+	ScanBudgetMaxMinutes int        `json:"scan_budget_max_minutes,omitempty"`
+}
+
 type proxySubscriptionNodeEvaluation struct {
 	Key                 string
 	Country             string
@@ -824,6 +835,7 @@ type adminServiceImpl struct {
 	scanStateMu          sync.Mutex
 	scanActive           bool
 	scanActiveSourceID   int64
+	scanStartedAt        time.Time
 }
 
 type userGroupRateBatchReader interface {
@@ -4022,6 +4034,39 @@ func (s *adminServiceImpl) ScanProxySubscriptionSource(ctx context.Context, id i
 	return result, nil
 }
 
+func (s *adminServiceImpl) GetProxySubscriptionScanStatus(ctx context.Context) (*ProxySubscriptionScanStatus, error) {
+	status := &ProxySubscriptionScanStatus{}
+	if s == nil {
+		return status, nil
+	}
+	s.scanStateMu.Lock()
+	active := s.scanActive
+	sourceID := s.scanActiveSourceID
+	startedAt := s.scanStartedAt
+	s.scanStateMu.Unlock()
+	if !active || sourceID <= 0 {
+		return status, nil
+	}
+	status.Active = true
+	status.SourceID = sourceID
+	if !startedAt.IsZero() {
+		status.StartedAt = &startedAt
+		status.ElapsedSeconds = int(time.Since(startedAt).Seconds())
+	}
+	if s.entClient == nil {
+		return status, nil
+	}
+	source, err := s.getProxySubscriptionSourceForScan(ctx, sourceID)
+	if err != nil {
+		return status, nil
+	}
+	status.SourceName = source.Name
+	strategy := normalizeProxySubscriptionStrategy(source.Strategy)
+	status.ScanBudgetMinutes = strategy.ScanBudgetMinutes
+	status.ScanBudgetMaxMinutes = strategy.ScanBudgetMaxMinutes
+	return status, nil
+}
+
 func (s *adminServiceImpl) ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]ProxySubscriptionNode, error) {
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
@@ -4098,6 +4143,7 @@ func (s *adminServiceImpl) tryStartProxySubscriptionScan(sourceID int64) error {
 	}
 	s.scanActive = true
 	s.scanActiveSourceID = sourceID
+	s.scanStartedAt = time.Now()
 	return nil
 }
 
@@ -4106,6 +4152,7 @@ func (s *adminServiceImpl) finishProxySubscriptionScan() {
 	defer s.scanStateMu.Unlock()
 	s.scanActive = false
 	s.scanActiveSourceID = 0
+	s.scanStartedAt = time.Time{}
 }
 
 func (s *adminServiceImpl) loadProxySubscriptionNodeState(ctx context.Context, sourceID int64) (map[string]ProxySubscriptionNode, error) {

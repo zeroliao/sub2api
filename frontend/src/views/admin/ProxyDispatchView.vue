@@ -145,7 +145,10 @@
         />
         <div class="flex justify-end gap-2">
           <button class="btn btn-secondary" :disabled="importing" @click="previewImport">预览</button>
-          <button class="btn btn-primary" :disabled="!preview || importing" @click="confirmImport">导入推荐节点</button>
+          <button class="btn btn-primary" :disabled="!preview || importing || importablePreviewCount === 0" @click="confirmImport">导入推荐节点</button>
+        </div>
+        <div v-if="preview?.sidecar_only" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+          检测到 {{ preview.sidecar_only }} 个节点需要通过“代理订阅源”接入，先扫描订阅并生成本地 sidecar 出口后，才能参与代理池分发。
         </div>
         <div v-if="preview" class="rounded-lg border border-gray-200 dark:border-dark-700">
           <div class="border-b border-gray-200 p-3 text-sm dark:border-dark-700">
@@ -156,9 +159,19 @@
               <tbody>
                 <tr v-for="item in preview.items" :key="item.key" class="border-b border-gray-100 dark:border-dark-800">
                   <td class="px-3 py-2">
-                    <input v-model="item.selected" type="checkbox" :disabled="!item.valid || item.duplicate || item.sidecar_required" />
+                    <input
+                      v-model="item.selected"
+                      type="checkbox"
+                      :disabled="!item.valid || item.duplicate || item.sidecar_required"
+                      :title="proxyImportItemDisabledReason(item) || undefined"
+                    />
                   </td>
-                  <td class="px-3 py-2">{{ item.name || item.host || item.protocol }}</td>
+                  <td class="px-3 py-2">
+                    <div>{{ item.name || item.host || item.protocol }}</div>
+                    <div v-if="proxyImportItemDisabledReason(item)" class="mt-1 text-xs text-gray-500">
+                      {{ proxyImportItemDisabledReason(item) }}
+                    </div>
+                  </td>
                   <td class="px-3 py-2">{{ item.protocol }}</td>
                   <td class="px-3 py-2">{{ item.host }}:{{ item.port || '-' }}</td>
                   <td class="px-3 py-2">
@@ -166,6 +179,9 @@
                     <span v-else-if="item.duplicate" class="badge badge-gray">重复</span>
                     <span v-else-if="item.valid" class="badge badge-success">可导入</span>
                     <span v-else class="badge badge-danger">{{ item.error || '无效' }}</span>
+                    <div v-if="item.sidecar_required && item.sidecar_hint" class="mt-1 text-xs text-gray-500">
+                      {{ item.sidecar_hint }}
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -183,50 +199,314 @@
           <button class="btn btn-primary" @click="createSubscription">新增订阅</button>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-4">
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="subscriptionForm.sidecar_enabled" type="checkbox" class="h-4 w-4" />
-            启用 sidecar
-          </label>
-          <select v-model="subscriptionForm.runtime" class="input">
-            <option value="sing-box">sing-box</option>
-          </select>
-          <select v-model="subscriptionForm.reputation_provider" class="input">
-            <option value="none">不做纯净度检测</option>
-            <option value="abuseipdb">AbuseIPDB</option>
-          </select>
-          <input v-model="subscriptionForm.reputation_api_key_ref" class="input" placeholder="密钥引用，如 env:ABUSEIPDB_API_KEY 或 keymd:AbuseIPDB API Key" />
-          <input v-model.number="subscriptionForm.strategy.max_enabled_nodes" class="input" type="number" min="1" placeholder="最大导入节点数" />
-          <input v-model.number="subscriptionForm.strategy.max_active_sidecar_nodes" class="input" type="number" min="1" placeholder="活跃出口数" />
-          <input v-model.number="subscriptionForm.strategy.standby_nodes" class="input" type="number" min="0" placeholder="备用节点数" />
-          <input v-model.number="subscriptionForm.strategy.max_nodes_per_country" class="input" type="number" min="1" placeholder="每国家节点上限" />
-          <input v-model.number="subscriptionForm.strategy.min_country_count" class="input" type="number" min="1" placeholder="最少国家数" />
-          <input v-model.number="subscriptionForm.strategy.max_country_count" class="input" type="number" min="1" placeholder="最多国家数" />
-          <input v-model.number="subscriptionForm.strategy.max_latency_ms" class="input" type="number" min="1" placeholder="最大延迟 ms" />
-          <input v-model.number="subscriptionForm.strategy.min_quality_score" class="input" type="number" min="0" max="100" placeholder="最低综合分" />
-          <input v-model.number="subscriptionForm.strategy.min_ip_clean_score" class="input" type="number" min="0" max="100" placeholder="最低纯净度" />
-          <input v-model.number="subscriptionForm.strategy.scan_batch_size" class="input" type="number" min="1" placeholder="扫描批大小" />
-          <input v-model.number="subscriptionForm.strategy.scan_budget_minutes" class="input" type="number" min="5" placeholder="目标扫描时长 分钟" />
-          <input v-model.number="subscriptionForm.strategy.scan_budget_max_minutes" class="input" type="number" min="5" placeholder="最大扫描时长 分钟" />
-          <input v-model.number="subscriptionForm.strategy.reputation_cache_hours" class="input" type="number" min="1" placeholder="纯净度缓存 小时" />
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="subscriptionForm.strategy.resource_adaptive_scan" type="checkbox" class="h-4 w-4" />
-            资源自适应扫描
-          </label>
-          <input v-model.number="subscriptionForm.strategy.min_free_memory_mb" class="input" type="number" min="128" placeholder="最低空闲内存 MB" />
-          <input v-model.number="subscriptionForm.strategy.pause_free_memory_mb" class="input" type="number" min="128" placeholder="暂停扫描内存阈值 MB" />
-          <input v-model.number="subscriptionForm.strategy.timeout_sleep_after" class="input" type="number" min="1" placeholder="超时几次休眠" />
-          <input v-model.number="subscriptionForm.strategy.sleep_minutes" class="input" type="number" min="1" placeholder="休眠分钟数" />
-          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
-            <input v-model="subscriptionForm.strategy.replace_same_country_first" type="checkbox" class="h-4 w-4" />
-            优先同国家替补
-          </label>
-          <input v-model.number="subscriptionForm.port_start" class="input" type="number" min="1" placeholder="端口起始" />
-          <input v-model.number="subscriptionForm.port_end" class="input" type="number" min="1" placeholder="端口结束" />
-          <input v-model.number="subscriptionForm.scan_interval_minutes" class="input" type="number" min="5" placeholder="扫描周期分钟" />
-          <input v-model.number="subscriptionForm.health_check_interval_minutes" class="input" type="number" min="5" placeholder="健康检查分钟" />
-          <input v-model="preferredCountriesText" class="input md:col-span-2" placeholder="优先国家，逗号分隔，例如 US,JP,SG" />
-          <input v-model="blockedCountriesText" class="input md:col-span-2" placeholder="屏蔽国家，逗号分隔，例如 RU,IR" />
+        <div v-if="activeScanningSourceID" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+          <div class="font-medium">订阅扫描进行中</div>
+          <div class="mt-1">
+            当前订阅：{{ activeScanningName }}，已运行 {{ formatScanElapsed(activeScanningSourceID) }}，预计 {{ formatActiveScanEstimate() }}
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-900">
+          <button
+            class="flex w-full items-center justify-between gap-4 px-4 py-3 text-left"
+            type="button"
+            @click="subscriptionMetricsCollapsed = !subscriptionMetricsCollapsed"
+          >
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-gray-900 dark:text-white">订阅策略指标</div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-300">
+                扫描时长、国家分布、sidecar 出口数量、纯净度阈值等高级参数
+              </div>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <span
+                  v-for="item in subscriptionMetricsSummary"
+                  :key="item.label"
+                  class="rounded-md border border-gray-200 bg-gray-50 px-2 py-1 text-xs text-gray-600 dark:border-dark-700 dark:bg-dark-800 dark:text-dark-200"
+                >
+                  {{ item.label }} {{ item.value }}
+                </span>
+              </div>
+            </div>
+            <span class="text-sm text-gray-500 dark:text-dark-300">
+              {{ subscriptionMetricsCollapsed ? '展开' : '收起' }}
+            </span>
+          </button>
+        </div>
+
+        <div v-if="!subscriptionMetricsCollapsed" class="grid gap-4 xl:grid-cols-2">
+          <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40">
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">接入与检测</div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-300">控制订阅源如何生成本地出口，以及是否做 IP 纯净度识别。</div>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">启用 sidecar</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">将订阅节点转换为本地 socks5 出口，供代理池和账号分发使用。</div>
+              </div>
+              <label class="inline-flex items-center justify-self-start gap-2 text-sm text-gray-700 dark:text-gray-200 sm:justify-self-end">
+                <input v-model="subscriptionForm.sidecar_enabled" type="checkbox" class="h-4 w-4" />
+                <span>开启</span>
+              </label>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">运行时</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">负责实际拉起订阅节点并暴露本地代理端口的 sidecar 程序。</div>
+              </div>
+              <select v-model="subscriptionForm.runtime" class="input w-full sm:justify-self-end">
+                <option value="sing-box">sing-box</option>
+              </select>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">纯净度检测来源</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">用于识别出口 IP 风险分与国家信息，帮助筛掉不干净的节点。</div>
+              </div>
+              <select v-model="subscriptionForm.reputation_provider" class="input w-full sm:justify-self-end">
+                <option value="none">不做纯净度检测</option>
+                <option value="abuseipdb">AbuseIPDB</option>
+              </select>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">纯净度 API Key 引用</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">支持 `env:` 或 `keymd:` 形式，避免把密钥明文直接写进页面配置。</div>
+              </div>
+              <input v-model="subscriptionForm.reputation_api_key_ref" class="input w-full sm:justify-self-end" placeholder="env:ABUSEIPDB_API_KEY 或 keymd:AbuseIPDB API Key" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">端口起始</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">sidecar 本地出口分配的起始端口，首个活跃节点会从这里开始占用。</div>
+              </div>
+              <input v-model.number="subscriptionForm.port_start" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">端口结束</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">sidecar 可用端口范围上限，活跃出口数不能超过这个端口池容量。</div>
+              </div>
+              <input v-model.number="subscriptionForm.port_end" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">扫描周期分钟</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">后台自动重扫这个订阅源的频率，用于持续刷新节点状态与推荐结果。</div>
+              </div>
+              <input v-model.number="subscriptionForm.scan_interval_minutes" class="input w-full sm:justify-self-end" type="number" min="5" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">健康检查分钟</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">对已生成的本地出口做可用性检查的间隔，帮助尽快发现失效 sidecar。</div>
+              </div>
+              <input v-model.number="subscriptionForm.health_check_interval_minutes" class="input w-full sm:justify-self-end" type="number" min="5" />
+            </div>
+          </div>
+
+          <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40">
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">筛选与配额</div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-300">决定最终保留多少节点、如何做国家分布，以及节点必须达到的最低质量门槛。</div>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最大导入节点数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">扫描完成后最多保留多少个候选节点进入已选池。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.max_enabled_nodes" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">活跃出口数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">最终真正生成本地 sidecar 出口的节点数量，影响可供分发的本地代理总数。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.max_active_sidecar_nodes" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">备用节点数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">除已选节点外，额外预留的候补节点数量，便于主节点失效时接替。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.standby_nodes" class="input w-full sm:justify-self-end" type="number" min="0" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">每国家节点上限</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">同一个国家最多保留多少个节点，避免候选池过度集中到单一国家。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.max_nodes_per_country" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最少国家数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">优先保证至少覆盖这么多个国家，再按总分继续补齐节点。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.min_country_count" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最多国家数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">已覆盖国家超过这个数量后，不再继续引入新的国家维度。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.max_country_count" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最大延迟 ms</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">延迟高于这个阈值的节点会被降级或直接筛掉。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.max_latency_ms" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最低综合分</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">节点总评分必须达到这个分数，才有资格进入推荐候选池。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.min_quality_score" class="input w-full sm:justify-self-end" type="number" min="0" max="100" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最低纯净度</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">出口 IP 纯净度低于这个分数时，不再作为优先推荐节点。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.min_ip_clean_score" class="input w-full sm:justify-self-end" type="number" min="0" max="100" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">优先国家</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">用逗号分隔国家代码，例如 `US,JP,SG`，这些国家会在评分时获得优先级。</div>
+              </div>
+              <input v-model="preferredCountriesText" class="input w-full sm:justify-self-end" placeholder="US,JP,SG" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">屏蔽国家</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">用逗号分隔国家代码，例如 `RU,IR`，这些国家会在筛选阶段直接排除。</div>
+              </div>
+              <input v-model="blockedCountriesText" class="input w-full sm:justify-self-end" placeholder="RU,IR" />
+            </div>
+          </div>
+
+          <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40">
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">扫描节奏</div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-300">控制单轮扫描的批次、总时长预算与信誉缓存时间。</div>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">扫描批大小</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">每批处理多少个节点，批次之间会按预算插入短暂停顿。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.scan_batch_size" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">目标扫描时长 分钟</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">系统会尽量把整轮扫描控制在这个时长附近，用于平衡速度与资源占用。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.scan_budget_minutes" class="input w-full sm:justify-self-end" type="number" min="5" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最大扫描时长 分钟</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">单轮扫描的硬超时，超过后会停止继续处理，避免任务一直占用机器。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.scan_budget_max_minutes" class="input w-full sm:justify-self-end" type="number" min="5" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">纯净度缓存 小时</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">同一出口 IP 的信誉结果缓存多久，减少频繁调用外部信誉 API。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.reputation_cache_hours" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+          </div>
+
+          <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40">
+            <div>
+              <div class="text-sm font-medium text-gray-900 dark:text-white">资源保护与容错</div>
+              <div class="mt-1 text-xs text-gray-500 dark:text-dark-300">避免扫描吃满机器资源，并在节点连续超时时自动休眠和替补。</div>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">资源自适应扫描</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">根据当前机器内存情况动态放慢或延后扫描，避免影响线上服务。</div>
+              </div>
+              <label class="inline-flex items-center justify-self-start gap-2 text-sm text-gray-700 dark:text-gray-200 sm:justify-self-end">
+                <input v-model="subscriptionForm.strategy.resource_adaptive_scan" type="checkbox" class="h-4 w-4" />
+                <span>开启</span>
+              </label>
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">最低空闲内存 MB</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">资源自适应扫描的参考安全线，低于该值时会明显放慢扫描节奏。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.min_free_memory_mb" class="input w-full sm:justify-self-end" type="number" min="128" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">暂停扫描内存阈值 MB</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">可用内存低于这个值时，自动扫描会先延后，等机器恢复后再继续。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.pause_free_memory_mb" class="input w-full sm:justify-self-end" type="number" min="128" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">超时几次休眠</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">同一个节点连续超时达到这个次数后，会暂时停用，避免反复拖慢扫描。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.timeout_sleep_after" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">休眠分钟数</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">节点进入休眠后多久才允许重新参与扫描和候选选择。</div>
+              </div>
+              <input v-model.number="subscriptionForm.strategy.sleep_minutes" class="input w-full sm:justify-self-end" type="number" min="1" />
+            </div>
+
+            <div class="grid items-center gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
+              <div>
+                <div class="text-sm text-gray-900 dark:text-white">优先同国家替补</div>
+                <div class="text-xs text-gray-500 dark:text-dark-300">已选节点失效后，优先从同一国家的备用节点里补位，减少出口地域波动。</div>
+              </div>
+              <label class="inline-flex items-center justify-self-start gap-2 text-sm text-gray-700 dark:text-gray-200 sm:justify-self-end">
+                <input v-model="subscriptionForm.strategy.replace_same_country_first" type="checkbox" class="h-4 w-4" />
+                <span>开启</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         <div class="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-700">
@@ -238,7 +518,12 @@
                 <span>已选 {{ readScanNumber(source.last_scan_result, 'selected') ?? '-' }}</span>
                 <span>sidecar {{ source.sidecar_enabled ? 'on' : 'off' }}</span>
                 <span>纯净度 {{ source.reputation_provider || 'none' }}</span>
-                <span>最近扫描 {{ formatDate(source.last_scan_at) }}</span>
+                <span v-if="isScanning(source.id)">扫描中 {{ formatScanElapsed(source.id) }}</span>
+                <span v-else>最近扫描 {{ formatDate(source.last_scan_at) }}</span>
+              </div>
+              <div v-if="isScanning(source.id)" class="flex flex-wrap gap-2 text-xs">
+                <span class="badge badge-warning">扫描中</span>
+                <span class="text-blue-600 dark:text-blue-300">预计 {{ formatSourceScanEstimate(source) }}</span>
               </div>
               <div v-if="source.last_error" class="text-xs text-red-500">{{ source.last_error }}</div>
             </div>
@@ -246,7 +531,7 @@
               <button class="btn btn-sm btn-secondary" @click="syncSubscription(source.id)">同步预览</button>
               <button class="btn btn-sm btn-secondary" :disabled="isScanning(source.id)" @click="scanSubscription(source.id)">
                 <Icon name="refresh" size="sm" :class="isScanning(source.id) ? 'animate-spin mr-1' : 'mr-1'" />
-                扫描
+                {{ isScanning(source.id) ? '扫描中' : '扫描' }}
               </button>
               <button class="btn btn-sm btn-secondary" @click="openSubscriptionNodes(source)">节点</button>
               <button class="btn btn-sm btn-danger" @click="deleteSubscription(source.id)">删除</button>
@@ -335,16 +620,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type {
   AccountProxyBinding,
   ProxyDispatchSettings,
   ProxyImportPreview,
+  ProxyImportPreviewItem,
   ProxyRelationship,
   ProxySubscriptionNode,
   ProxySubscriptionScanResult,
+  ProxySubscriptionScanStatus,
   ProxySubscriptionSource,
   ProxySubscriptionStrategy
 } from '@/types'
@@ -425,6 +712,12 @@ const importContent = ref('')
 const preferredCountriesText = ref('')
 const blockedCountriesText = ref('')
 const scanningSubscriptionIds = ref<number[]>([])
+const subscriptionMetricsCollapsed = ref(true)
+const scanStartedAtMap = reactive<Record<number, number>>({})
+const scanNow = ref(Date.now())
+const serverScanStatus = ref<ProxySubscriptionScanStatus | null>(null)
+let scanTicker: ReturnType<typeof setInterval> | null = null
+let scanStatusPoller: ReturnType<typeof setInterval> | null = null
 
 const settings = reactive<ProxyDispatchSettings>({
   direct_fallback_mode: 'off',
@@ -433,6 +726,25 @@ const settings = reactive<ProxyDispatchSettings>({
 const filters = reactive({ platform: '', status: '', search: '' })
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 const subscriptionForm = reactive(createSubscriptionForm())
+const importablePreviewCount = computed(() => {
+  if (!preview.value) return 0
+  return preview.value.items.filter(item => item.valid && !item.duplicate && !item.sidecar_required && item.selected).length
+})
+const activeScanningSource = computed(() => subscriptions.value.find(source => isScanning(source.id)) || null)
+const activeScanningSourceID = computed(() => scanningSubscriptionIds.value[0] || serverScanStatus.value?.source_id || 0)
+const activeScanningName = computed(() => {
+  const source = activeScanningSource.value
+  return source?.name || serverScanStatus.value?.source_name || `订阅源 #${serverScanStatus.value?.source_id || ''}`
+})
+const subscriptionMetricsSummary = computed(() => [
+  { label: '活跃出口', value: String(subscriptionForm.strategy.max_active_sidecar_nodes) },
+  { label: '最大导入', value: String(subscriptionForm.strategy.max_enabled_nodes) },
+  {
+    label: '扫描预算',
+    value: `${subscriptionForm.strategy.scan_budget_minutes}-${subscriptionForm.strategy.scan_budget_max_minutes} 分钟`
+  },
+  { label: '最低纯净度', value: String(subscriptionForm.strategy.min_ip_clean_score) }
+])
 
 const columns = computed<Column[]>(() => [
   { key: 'account', label: '账号' },
@@ -473,20 +785,129 @@ function isScanning(id: number) {
   return scanningSubscriptionIds.value.includes(id)
 }
 
+function replaceScanningSource(id: number | null, startedAt?: string | null) {
+  scanningSubscriptionIds.value = id ? [id] : []
+  for (const key of Object.keys(scanStartedAtMap)) {
+    delete scanStartedAtMap[Number(key)]
+  }
+  if (id) {
+    scanStartedAtMap[id] = startedAt ? new Date(startedAt).getTime() : Date.now()
+    scanNow.value = Date.now()
+    startScanTicker()
+  } else {
+    stopScanTickerIfIdle()
+  }
+}
+
+function startScanTicker() {
+  if (scanTicker) return
+  scanTicker = setInterval(() => {
+    scanNow.value = Date.now()
+  }, 1000)
+}
+
+function stopScanTickerIfIdle() {
+  if (scanningSubscriptionIds.value.length > 0 || !scanTicker) return
+  clearInterval(scanTicker)
+  scanTicker = null
+}
+
 function markScanning(id: number, active: boolean) {
   if (active) {
     if (!isScanning(id)) {
       scanningSubscriptionIds.value = [...scanningSubscriptionIds.value, id]
     }
+    if (!scanStartedAtMap[id]) {
+      scanStartedAtMap[id] = Date.now()
+    }
+    scanNow.value = Date.now()
+    startScanTicker()
     return
   }
   scanningSubscriptionIds.value = scanningSubscriptionIds.value.filter(item => item !== id)
+  delete scanStartedAtMap[id]
+  stopScanTickerIfIdle()
+}
+
+async function syncScanStatus() {
+  try {
+    const status = await adminAPI.proxies.getProxySubscriptionScanStatus()
+    serverScanStatus.value = status
+    if (status.active && status.source_id) {
+      replaceScanningSource(status.source_id, status.started_at)
+    } else {
+      replaceScanningSource(null)
+    }
+  } catch {
+    // Keep the local in-flight state if polling fails once.
+  }
+}
+
+function startScanStatusPolling() {
+  if (scanStatusPoller) return
+  scanStatusPoller = setInterval(() => {
+    void syncScanStatus()
+  }, 3000)
+}
+
+function stopScanStatusPolling() {
+  if (!scanStatusPoller) return
+  clearInterval(scanStatusPoller)
+  scanStatusPoller = null
 }
 
 function readScanNumber(result: Record<string, unknown> | undefined, key: string) {
   if (!result) return null
   const value = result[key]
   return typeof value === 'number' ? value : null
+}
+
+function proxyImportItemDisabledReason(item: ProxyImportPreviewItem) {
+  if (!item.valid) return item.error || '节点格式无效，不能导入'
+  if (item.duplicate) return '该节点已存在于代理池中，已跳过'
+  if (item.sidecar_required) return '该节点需通过代理订阅源接入，不能直接导入普通代理池'
+  return ''
+}
+
+function formatDurationMs(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes <= 0) return `${seconds} 秒`
+  if (minutes < 60) return `${minutes} 分 ${seconds.toString().padStart(2, '0')} 秒`
+  const hours = Math.floor(minutes / 60)
+  const remainMinutes = minutes % 60
+  return `${hours} 小时 ${remainMinutes} 分`
+}
+
+function formatScanElapsed(id: number) {
+  const startedAt = scanStartedAtMap[id]
+  if (!startedAt) return '刚开始'
+  return formatDurationMs(scanNow.value - startedAt)
+}
+
+function formatSourceScanEstimate(source: ProxySubscriptionSource) {
+  const minMinutes = source.strategy?.scan_budget_minutes || 30
+  const maxMinutes = source.strategy?.scan_budget_max_minutes || Math.max(40, minMinutes)
+  if (maxMinutes <= minMinutes) return `${minMinutes} 分钟内`
+  return `${minMinutes}-${maxMinutes} 分钟`
+}
+
+function formatActiveScanEstimate() {
+  const source = activeScanningSource.value
+  if (source) return formatSourceScanEstimate(source)
+  const status = serverScanStatus.value
+  if (!status?.active) return '-'
+  const minMinutes = status.scan_budget_minutes || 30
+  const maxMinutes = status.scan_budget_max_minutes || Math.max(40, minMinutes)
+  if (maxMinutes <= minMinutes) return `${minMinutes} 分钟内`
+  return `${minMinutes}-${maxMinutes} 分钟`
+}
+
+function isBusyScanError(error: any) {
+  const reason = error?.response?.data?.reason || error?.response?.data?.error?.reason || ''
+  const detail = error?.response?.data?.detail || error?.message || ''
+  return reason === 'PROXY_SUBSCRIPTION_SCAN_BUSY' || String(detail).includes('PROXY_SUBSCRIPTION_SCAN_BUSY')
 }
 
 async function loadRelationships() {
@@ -568,7 +989,15 @@ async function confirmImport() {
   importing.value = true
   try {
     const result = await adminAPI.proxies.confirmImport(preview.value.items)
-    appStore.showSuccess(`已导入 ${result.created} 个代理，跳过 ${result.skipped} 个`)
+    const sidecarOnly = preview.value.sidecar_only || 0
+    const messageParts = [`已导入 ${result.created} 个代理`]
+    if (result.skipped > 0) {
+      messageParts.push(`跳过 ${result.skipped} 个`)
+    }
+    if (sidecarOnly > 0) {
+      messageParts.push(`${sidecarOnly} 个 sidecar 节点请通过代理订阅源接入`)
+    }
+    appStore.showSuccess(messageParts.join('，'))
     showImport.value = false
     preview.value = null
   } catch (error: any) {
@@ -604,15 +1033,29 @@ async function syncSubscription(id: number) {
 }
 
 async function scanSubscription(id: number) {
+  if (isScanning(id)) {
+    appStore.showWarning?.('该订阅源正在扫描中，请等待当前任务完成后再试')
+    return
+  }
   markScanning(id, true)
   try {
     scanResult.value = await adminAPI.proxies.scanProxySubscription(id)
     await loadSubscriptions()
     appStore.showSuccess(`扫描完成，已选中 ${scanResult.value.selected} 个节点`)
   } catch (error: any) {
-    appStore.showError(error?.message || '扫描订阅失败')
+    if (isBusyScanError(error)) {
+      await syncScanStatus()
+      const scanningSource = activeScanningSource.value
+      const detail = scanningSource
+        ? `当前正在扫描“${scanningSource.name}”，已运行 ${formatScanElapsed(scanningSource.id)}，请稍后再试`
+        : '当前已有订阅扫描任务在运行，请等待其完成后再试'
+      appStore.showWarning?.(detail)
+    } else {
+      appStore.showError(error?.message || '扫描订阅失败')
+    }
   } finally {
     markScanning(id, false)
+    await syncScanStatus()
   }
 }
 
@@ -653,5 +1096,15 @@ function formatDate(value?: string | null) {
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadRelationships(), loadSubscriptions()])
+  await syncScanStatus()
+  startScanStatusPolling()
+})
+
+onUnmounted(() => {
+  stopScanStatusPolling()
+  if (scanTicker) {
+    clearInterval(scanTicker)
+    scanTicker = null
+  }
 })
 </script>
