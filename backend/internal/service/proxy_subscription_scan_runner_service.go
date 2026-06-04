@@ -16,13 +16,15 @@ import (
 const proxySubscriptionScanRunnerSchedule = "* * * * *"
 
 type ProxySubscriptionScanRunnerService struct {
-	adminSvc AdminService
+	adminSvc  AdminService
 	entClient *dbent.Client
-	cfg      *config.Config
+	cfg       *config.Config
 
 	cron      *cron.Cron
 	startOnce sync.Once
 	stopOnce  sync.Once
+	runMu     sync.Mutex
+	running   bool
 }
 
 type proxySubscriptionScanRunnerSource struct {
@@ -81,6 +83,12 @@ func (s *ProxySubscriptionScanRunnerService) Stop() {
 }
 
 func (s *ProxySubscriptionScanRunnerService) runDueScan() {
+	if !s.tryStartRun() {
+		logger.LegacyPrintf("service.proxy_subscription_scan_runner", "[ProxySubscriptionScanRunner] tick skipped: scan already running")
+		return
+	}
+	defer s.finishRun()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
 	defer cancel()
 
@@ -131,6 +139,22 @@ func (s *ProxySubscriptionScanRunnerService) runDueScan() {
 		result.Saved,
 		len(result.Errors),
 	)
+}
+
+func (s *ProxySubscriptionScanRunnerService) tryStartRun() bool {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	if s.running {
+		return false
+	}
+	s.running = true
+	return true
+}
+
+func (s *ProxySubscriptionScanRunnerService) finishRun() {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	s.running = false
 }
 
 func (s *ProxySubscriptionScanRunnerService) findNextDueSource(ctx context.Context) (*proxySubscriptionScanRunnerSource, error) {
