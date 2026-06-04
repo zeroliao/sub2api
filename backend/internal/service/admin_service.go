@@ -4596,20 +4596,21 @@ func (s *adminServiceImpl) reserveProxySidecarEndpoint(ctx context.Context, sour
 	}
 	_, err := s.entClient.ExecContext(ctx, `
 INSERT INTO proxy_sidecar_endpoints (source_id, node_id, runtime, listen_host, listen_port, protocol, status, updated_at)
-VALUES ($1, $2, $3, '127.0.0.1', $4, 'socks5', 'pending', NOW())
+VALUES ($1, $2, $3, $4, $5, 'socks5', 'pending', NOW())
 ON CONFLICT (node_id) WHERE deleted_at IS NULL
-DO UPDATE SET runtime = EXCLUDED.runtime, listen_port = EXCLUDED.listen_port,
+DO UPDATE SET runtime = EXCLUDED.runtime, listen_host = EXCLUDED.listen_host, listen_port = EXCLUDED.listen_port,
               status = 'pending', updated_at = NOW()`,
-		source.ID, nodeID, defaultString(source.Runtime, "sing-box"), port)
+		source.ID, nodeID, defaultString(source.Runtime, "sing-box"), sidecarListenHost(), port)
 	return err
 }
 
 func (s *adminServiceImpl) refreshProxySidecarEndpointReadiness(ctx context.Context, nodeID, proxyID int64, port int) error {
 	endpointStatus := "pending"
 	proxyStatus := StatusDisabled
-	lastError := fmt.Sprintf("local sidecar endpoint 127.0.0.1:%d is not ready", port)
+	host := sidecarProbeHost()
+	lastError := fmt.Sprintf("sidecar endpoint %s:%d is not ready", host, port)
 	lastStartedAt := any(nil)
-	if isLocalTCPPortReachable(ctx, "127.0.0.1", port) {
+	if isLocalTCPPortReachable(ctx, host, port) {
 		endpointStatus = "ready"
 		proxyStatus = StatusActive
 		lastError = ""
@@ -4652,6 +4653,30 @@ func isLocalTCPPortReachable(ctx context.Context, host string, port int) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+func sidecarListenHost() string {
+	if host := strings.TrimSpace(os.Getenv("SUB2API_SIDECAR_LISTEN_HOST")); host != "" {
+		return host
+	}
+	return "0.0.0.0"
+}
+
+func sidecarProxyHost() string {
+	if host := strings.TrimSpace(os.Getenv("SUB2API_SIDECAR_PROXY_HOST")); host != "" {
+		return host
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("SUB2API_SIDECAR_USE_LOCALHOST")), "true") {
+		return "127.0.0.1"
+	}
+	return "sing-box"
+}
+
+func sidecarProbeHost() string {
+	if host := strings.TrimSpace(os.Getenv("SUB2API_SIDECAR_PROBE_HOST")); host != "" {
+		return host
+	}
+	return sidecarProxyHost()
 }
 
 func (s *adminServiceImpl) retireProxySubscriptionSourceResources(ctx context.Context, sourceID int64, reason string) error {
@@ -5121,7 +5146,8 @@ func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Con
 	if evaluation.LastError == "" && evaluation.LatencyMs != nil && *evaluation.LatencyMs <= 1500 {
 		qualityStatus = ProxyQualityHealthy
 	}
-	proxy, exists, err := s.findProxyByAddress(ctx, "127.0.0.1", port, "", "")
+	proxyHost := sidecarProxyHost()
+	proxy, exists, err := s.findProxyByAddress(ctx, proxyHost, port, "", "")
 	if err != nil {
 		return err
 	}
@@ -5129,7 +5155,7 @@ func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Con
 		proxy, err = s.CreateProxy(ctx, &CreateProxyInput{
 			Name:          proxyName,
 			Protocol:      "socks5",
-			Host:          "127.0.0.1",
+			Host:          proxyHost,
 			Port:          port,
 			Source:        "subscription",
 			ProxyType:     "sidecar",
@@ -5154,7 +5180,7 @@ WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
 	if _, err := s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{
 		Name:          proxyName,
 		Protocol:      "socks5",
-		Host:          "127.0.0.1",
+		Host:          proxyHost,
 		Port:          port,
 		Status:        proxy.Status,
 		Source:        "subscription",

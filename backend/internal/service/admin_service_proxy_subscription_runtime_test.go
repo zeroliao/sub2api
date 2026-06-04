@@ -36,3 +36,30 @@ func TestIsLocalTCPPortReachable_ReturnsFalseWhenClosed(t *testing.T) {
 	defer cancel()
 	require.False(t, isLocalTCPPortReachable(ctx, "127.0.0.1", addr.Port))
 }
+
+func TestSidecarProxyHostDefaultsToComposeService(t *testing.T) {
+	t.Setenv("SUB2API_SIDECAR_PROXY_HOST", "")
+	t.Setenv("SUB2API_SIDECAR_USE_LOCALHOST", "")
+
+	require.Equal(t, "sing-box", sidecarProxyHost())
+	require.Equal(t, "sing-box", sidecarProbeHost())
+	require.Equal(t, "0.0.0.0", sidecarListenHost())
+}
+
+func TestSidecarProxyHostCanUseLocalhostForSingleProcessDeploy(t *testing.T) {
+	t.Setenv("SUB2API_SIDECAR_PROXY_HOST", "")
+	t.Setenv("SUB2API_SIDECAR_USE_LOCALHOST", "true")
+	t.Setenv("SUB2API_SIDECAR_LISTEN_HOST", "127.0.0.1")
+
+	require.Equal(t, "127.0.0.1", sidecarProxyHost())
+	require.Equal(t, "127.0.0.1", sidecarProbeHost())
+	require.Equal(t, "127.0.0.1", sidecarListenHost())
+}
+
+func TestSidecarProbeHostCanOverrideProxyHost(t *testing.T) {
+	t.Setenv("SUB2API_SIDECAR_PROXY_HOST", "sidecar-proxy")
+	t.Setenv("SUB2API_SIDECAR_PROBE_HOST", "127.0.0.1")
+
+	require.Equal(t, "sidecar-proxy", sidecarProxyHost())
+	require.Equal(t, "127.0.0.1", sidecarProbeHost())
+}
