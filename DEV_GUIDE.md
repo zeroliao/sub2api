@@ -279,6 +279,8 @@ git fetch upstream
 git checkout dev/<version>
 git merge upstream/main
 
+# 创建版本开发分支前，先按运维仓库版本管理文档计算两个仓库共享的全局下一个版本号
+
 # 创建版本开发分支
 git checkout -b dev/<version>
 
