@@ -541,63 +541,216 @@
       </div>
     </BaseDialog>
 
-    <BaseDialog :show="showNodesDialog" :title="nodesDialogTitle" width="wide" @close="showNodesDialog = false">
+    <BaseDialog :show="showNodesDialog" :title="nodesDialogTitle" width="full" @close="closeSubscriptionNodes">
       <div class="space-y-4">
-        <div v-if="scanResult" class="grid gap-3 md:grid-cols-4">
-          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
-            <div class="text-xs text-gray-500">已解析</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ scanResult.parsed }}</div>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
+            <div class="text-sm font-medium text-gray-900 dark:text-white">{{ selectedNodeSource?.name || '订阅节点' }}</div>
+            <div class="truncate text-xs text-gray-500">{{ selectedNodeSource?.url || '扫描后会在这里展示订阅源下的全部节点' }}</div>
           </div>
-          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
-            <div class="text-xs text-gray-500">已入库</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ scanResult.saved }}</div>
-          </div>
-          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
-            <div class="text-xs text-gray-500">已选中</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ scanResult.selected }}</div>
-          </div>
-          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
-            <div class="text-xs text-gray-500">sidecar</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ scanResult.sidecar_required }}</div>
+          <div class="flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-secondary" @click="closeSubscriptionNodes">
+              <Icon name="arrowLeft" size="sm" class="mr-1" />
+              返回订阅源
+            </button>
+            <button class="btn btn-sm btn-secondary" :disabled="!selectedNodeSource || savingNodeStrategy" @click="saveNodeStrategy(false)">
+              保存策略
+            </button>
+            <button class="btn btn-sm btn-primary" :disabled="!selectedNodeSource || savingNodeStrategy || isScanning(selectedNodeSource.id)" @click="saveNodeStrategy(true)">
+              <Icon name="refresh" size="sm" :class="selectedNodeSource && isScanning(selectedNodeSource.id) ? 'animate-spin mr-1' : 'mr-1'" />
+              保存并扫描
+            </button>
           </div>
         </div>
 
-        <div class="max-h-[460px] overflow-auto rounded-lg border border-gray-200 dark:border-dark-700">
+        <div class="grid gap-3 md:grid-cols-6">
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">全部节点</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ nodePreviewSummary.total }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">预览选中</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ nodePreviewSummary.selected }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">备用</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ nodePreviewSummary.standby }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">不可选</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ nodePreviewSummary.excluded }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">国家数</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ nodePreviewSummary.countryCount }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">上次实际选中</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ selectedNodeSource ? readScanNumber(selectedNodeSource.last_scan_result, 'selected') ?? '-' : '-' }}</div>
+          </div>
+        </div>
+
+        <div class="grid gap-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40 lg:grid-cols-4">
+          <div class="lg:col-span-4">
+            <div class="flex flex-wrap gap-2">
+              <button
+                v-for="preset in nodeStrategyPresets"
+                :key="preset.key"
+                class="btn btn-sm btn-secondary"
+                type="button"
+                @click="applyNodeStrategyPreset(preset.key)"
+              >
+                {{ preset.label }}
+              </button>
+            </div>
+          </div>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">最大导入</span>
+            <input v-model.number="nodeStrategyDraft.max_enabled_nodes" class="input w-full" type="number" min="1" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">每国家上限</span>
+            <input v-model.number="nodeStrategyDraft.max_nodes_per_country" class="input w-full" type="number" min="1" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">最多国家数</span>
+            <input v-model.number="nodeStrategyDraft.max_country_count" class="input w-full" type="number" min="1" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">备用节点</span>
+            <input v-model.number="nodeStrategyDraft.standby_nodes" class="input w-full" type="number" min="0" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">最高延迟 ms</span>
+            <input v-model.number="nodeStrategyDraft.max_latency_ms" class="input w-full" type="number" min="1" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">最低纯净度</span>
+            <input v-model.number="nodeStrategyDraft.min_ip_clean_score" class="input w-full" type="number" min="0" max="100" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">最低综合分</span>
+            <input v-model.number="nodeStrategyDraft.min_quality_score" class="input w-full" type="number" min="0" max="100" />
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">状态筛选</span>
+            <select v-model="nodeStatusFilter" class="input w-full">
+              <option value="">全部</option>
+              <option value="selected">预览选中</option>
+              <option value="standby">备用</option>
+              <option value="candidate">候选</option>
+              <option value="excluded">不可选</option>
+              <option value="sleeping">休眠</option>
+              <option value="missing">缺失</option>
+            </select>
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">不可选原因</span>
+            <select v-model="nodeReasonFilter" class="input w-full">
+              <option value="">全部原因</option>
+              <option v-for="reason in nodeReasonOptions" :key="reason" :value="reason">{{ reason }}</option>
+            </select>
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">排序</span>
+            <select v-model="nodeSortKey" class="input w-full">
+              <option value="preview">预览状态</option>
+              <option value="score">分数高到低</option>
+              <option value="latency">延迟低到高</option>
+              <option value="clean">纯净度高到低</option>
+              <option value="country">国家</option>
+              <option value="name">节点名</option>
+            </select>
+          </label>
+          <label class="space-y-1 text-sm lg:col-span-2">
+            <span class="text-xs text-gray-500">优先国家</span>
+            <input v-model="nodePreferredCountriesText" class="input w-full" placeholder="US,JP,SG" />
+          </label>
+          <label class="space-y-1 text-sm lg:col-span-2">
+            <span class="text-xs text-gray-500">屏蔽国家</span>
+            <input v-model="nodeBlockedCountriesText" class="input w-full" placeholder="RU,IR" />
+          </label>
+        </div>
+
+        <div class="grid gap-3 lg:grid-cols-3">
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">策略差异</div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span class="badge badge-success">新增 {{ nodeDiffSummary.added }}</span>
+              <span class="badge badge-gray">移除 {{ nodeDiffSummary.removed }}</span>
+              <span class="badge badge-warning">保持 {{ nodeDiffSummary.unchanged }}</span>
+            </div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">最近扫描</div>
+            <div class="mt-1 text-gray-900 dark:text-white">{{ selectedNodeSource ? formatScanResultSummary(selectedNodeSource.last_scan_result) : '-' }}</div>
+            <div class="mt-1 text-xs text-gray-500">{{ formatDate(selectedNodeSource?.last_scan_at) }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 p-3 text-sm dark:border-dark-700">
+            <div class="text-xs text-gray-500">纯净度配置</div>
+            <div class="mt-1 text-gray-900 dark:text-white">{{ reputationConfigStatus }}</div>
+            <div class="mt-1 text-xs text-gray-500">{{ selectedNodeSource?.reputation_api_key_ref || '未设置 API Key 引用' }}</div>
+          </div>
+        </div>
+
+        <div class="max-h-[560px] overflow-auto rounded-lg border border-gray-200 dark:border-dark-700">
           <table class="w-full text-sm">
             <thead class="bg-gray-50 text-left text-xs text-gray-500 dark:bg-dark-900 dark:text-dark-300">
               <tr>
+                <th class="px-3 py-2">预览</th>
                 <th class="px-3 py-2">节点</th>
                 <th class="px-3 py-2">协议</th>
-                <th class="px-3 py-2">国家</th>
+                <th class="px-3 py-2">出口</th>
                 <th class="px-3 py-2">延迟</th>
                 <th class="px-3 py-2">纯净度</th>
                 <th class="px-3 py-2">分数</th>
-                <th class="px-3 py-2">状态</th>
+                <th class="px-3 py-2">运行指标</th>
+                <th class="px-3 py-2">状态与原因</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="node in subscriptionNodes" :key="node.id" class="border-t border-gray-100 dark:border-dark-800">
+              <tr v-for="row in filteredNodePreviewRows" :key="row.node.id" :class="['border-t border-gray-100 dark:border-dark-800', row.preview_status === 'excluded' || row.preview_status === 'missing' ? 'bg-gray-50/60 text-gray-500 dark:bg-dark-900/30' : '']">
                 <td class="px-3 py-2">
-                  <div class="font-medium text-gray-900 dark:text-white">{{ node.name || node.server }}</div>
-                  <div class="text-xs text-gray-500">{{ node.server }}:{{ node.port }}</div>
+                  <input type="checkbox" :checked="row.preview_status === 'selected'" disabled class="h-4 w-4" :aria-label="`${row.node.name || row.node.server} 是否按当前策略选中`" />
                 </td>
                 <td class="px-3 py-2">
-                  <div>{{ node.protocol }}</div>
-                  <div class="text-xs text-gray-500">{{ node.sidecar_required ? 'sidecar' : 'direct' }}</div>
+                  <div class="font-medium text-gray-900 dark:text-white">{{ row.node.name || row.node.server }}</div>
+                  <div class="text-xs text-gray-500">{{ row.node.server }}:{{ row.node.port }}</div>
+                  <div class="mt-1 max-w-[240px] truncate text-xs text-gray-400" :title="row.node.node_key">{{ row.node.node_key }}</div>
                 </td>
-                <td class="px-3 py-2">{{ node.exit_country || node.country_hint || '-' }}</td>
-                <td class="px-3 py-2">{{ node.latency_ms ?? '-' }}</td>
-                <td class="px-3 py-2">{{ node.ip_clean_score ?? '-' }}</td>
-                <td class="px-3 py-2">{{ node.score }}</td>
                 <td class="px-3 py-2">
-                  <span :class="['badge', node.selected ? 'badge-success' : 'badge-gray']">{{ node.status }}</span>
-                  <div v-if="node.timeout_count" class="mt-1 text-xs text-amber-500">超时 {{ node.timeout_count }} 次</div>
-                  <div v-if="node.sleep_until" class="mt-1 text-xs text-gray-500">休眠到 {{ formatDate(node.sleep_until) }}</div>
-                  <div v-if="node.last_error" class="mt-1 text-xs text-red-500">{{ node.last_error }}</div>
+                  <div>{{ row.node.protocol }}</div>
+                  <div class="text-xs text-gray-500">{{ row.node.sidecar_required ? 'sidecar' : 'direct' }}</div>
+                </td>
+                <td class="px-3 py-2">
+                  <div>{{ row.country || '-' }}</div>
+                  <div class="text-xs text-gray-500">{{ row.node.exit_ip || '-' }}</div>
+                  <div class="text-xs text-gray-500">{{ row.node.exit_country || row.node.exit_country_code || '' }}</div>
+                </td>
+                <td class="px-3 py-2">{{ row.node.latency_ms != null ? `${row.node.latency_ms} ms` : '-' }}</td>
+                <td class="px-3 py-2">
+                  <div>{{ row.node.ip_clean_score ?? '-' }}</div>
+                  <div class="text-xs text-gray-500">{{ row.node.reputation_provider || '-' }}</div>
+                  <div class="text-xs text-gray-500">{{ formatDate(row.node.reputation_checked_at) }}</div>
+                </td>
+                <td class="px-3 py-2">{{ row.node.score }}</td>
+                <td class="px-3 py-2">
+                  <div>失败 {{ row.node.failure_count || 0 }}</div>
+                  <div class="text-xs text-amber-600 dark:text-amber-300">超时 {{ row.node.timeout_count || 0 }}</div>
+                  <div class="text-xs text-gray-500">扫描 {{ formatDate(row.node.last_scanned_at) }}</div>
+                  <div v-if="row.node.sleep_until" class="text-xs text-gray-500">休眠 {{ formatDate(row.node.sleep_until) }}</div>
+                </td>
+                <td class="px-3 py-2">
+                  <div class="flex flex-wrap gap-1">
+                    <span :class="['badge', nodePreviewBadgeClass(row.preview_status)]">{{ nodePreviewStatusLabel(row.preview_status) }}</span>
+                    <span :class="['badge', row.node.selected ? 'badge-success' : 'badge-gray']">上次 {{ row.node.status }}</span>
+                  </div>
+                  <div class="mt-1 text-xs text-gray-500">{{ row.reason }}</div>
+                  <div v-if="row.node.last_error" class="mt-1 text-xs text-red-500">{{ row.node.last_error }}</div>
                 </td>
               </tr>
-              <tr v-if="!subscriptionNodes.length">
-                <td colspan="7" class="px-3 py-8 text-center text-sm text-gray-500">暂无节点数据</td>
+              <tr v-if="!filteredNodePreviewRows.length">
+                <td colspan="9" class="px-3 py-8 text-center text-sm text-gray-500">暂无匹配节点</td>
               </tr>
             </tbody>
           </table>
@@ -620,7 +773,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import type {
@@ -644,6 +798,8 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const appStore = useAppStore()
+const route = useRoute()
+const router = useRouter()
 
 function defaultStrategy(): ProxySubscriptionStrategy {
   return {
@@ -708,9 +864,16 @@ const showSubscriptions = ref(false)
 const showHistory = ref(false)
 const showNodesDialog = ref(false)
 const nodesDialogTitle = ref('订阅节点')
+const selectedNodeSource = ref<ProxySubscriptionSource | null>(null)
+const savingNodeStrategy = ref(false)
+const nodeStatusFilter = ref('')
+const nodeReasonFilter = ref('')
+const nodeSortKey = ref<'preview' | 'score' | 'latency' | 'clean' | 'country' | 'name'>('preview')
 const importContent = ref('')
 const preferredCountriesText = ref('')
 const blockedCountriesText = ref('')
+const nodePreferredCountriesText = ref('')
+const nodeBlockedCountriesText = ref('')
 const scanningSubscriptionIds = ref<number[]>([])
 const subscriptionMetricsCollapsed = ref(true)
 const scanStartedAtMap = reactive<Record<number, number>>({})
@@ -718,6 +881,7 @@ const scanNow = ref(Date.now())
 const serverScanStatus = ref<ProxySubscriptionScanStatus | null>(null)
 let scanTicker: ReturnType<typeof setInterval> | null = null
 let scanStatusPoller: ReturnType<typeof setInterval> | null = null
+let openingNodesRoute = false
 
 const settings = reactive<ProxyDispatchSettings>({
   direct_fallback_mode: 'off',
@@ -726,6 +890,7 @@ const settings = reactive<ProxyDispatchSettings>({
 const filters = reactive({ platform: '', status: '', search: '' })
 const pagination = reactive({ page: 1, page_size: 20, total: 0 })
 const subscriptionForm = reactive(createSubscriptionForm())
+const nodeStrategyDraft = reactive(defaultStrategy())
 const importablePreviewCount = computed(() => {
   if (!preview.value) return 0
   return preview.value.items.filter(item => item.valid && !item.duplicate && !item.sidecar_required && item.selected).length
@@ -745,6 +910,72 @@ const subscriptionMetricsSummary = computed(() => [
   },
   { label: '最低纯净度', value: String(subscriptionForm.strategy.min_ip_clean_score) }
 ])
+type NodePreviewStatus = 'selected' | 'standby' | 'candidate' | 'excluded' | 'sleeping' | 'missing'
+type NodePreviewRow = ProxySubscriptionNode & {
+  preview_status: NodePreviewStatus
+  preview_reason: string
+  preview_rank: number
+  preview_country: string
+}
+const nodeStrategyPresets = [
+  { key: 'stable', label: '稳定优先' },
+  { key: 'speed', label: '速度优先' },
+  { key: 'coverage', label: '国家覆盖' },
+  { key: 'conservative', label: '资源保守' }
+] as const
+type NodeStrategyPreset = typeof nodeStrategyPresets[number]['key']
+const nodePreviewRows = computed<NodePreviewRow[]>(() => previewSubscriptionNodes(subscriptionNodes.value, nodeStrategyDraft, selectedNodeSource.value))
+const filteredNodePreviewRows = computed(() => {
+  const status = nodeStatusFilter.value
+  const reason = nodeReasonFilter.value
+  return sortNodeRows(nodePreviewRows.value.filter(row => {
+    if (status && row.preview_status !== status) return false
+    if (reason && reasonCategory(row.preview_reason) !== reason) return false
+    return true
+  })).map(row => ({
+    node: row,
+    preview_status: row.preview_status,
+    reason: row.preview_reason,
+    country: row.preview_country
+  }))
+})
+const nodePreviewSummary = computed(() => {
+  const rows = nodePreviewRows.value
+  const selectedRows = rows.filter(row => row.preview_status === 'selected')
+  return {
+    total: rows.length,
+    selected: selectedRows.length,
+    standby: rows.filter(row => row.preview_status === 'standby').length,
+    excluded: rows.filter(row => row.preview_status === 'excluded' || row.preview_status === 'missing' || row.preview_status === 'sleeping').length,
+    countryCount: new Set(selectedRows.map(row => row.preview_country || 'unknown')).size
+  }
+})
+const nodeReasonOptions = computed(() => {
+  return Array.from(new Set(nodePreviewRows.value.map(row => reasonCategory(row.preview_reason)).filter(Boolean))).sort()
+})
+const nodeDiffSummary = computed(() => {
+  const previewSelected = new Set(nodePreviewRows.value.filter(row => row.preview_status === 'selected').map(row => row.node_key))
+  const actualSelected = new Set(subscriptionNodes.value.filter(node => node.selected).map(node => node.node_key))
+  let added = 0
+  let removed = 0
+  let unchanged = 0
+  previewSelected.forEach(key => {
+    if (actualSelected.has(key)) unchanged++
+    else added++
+  })
+  actualSelected.forEach(key => {
+    if (!previewSelected.has(key)) removed++
+  })
+  return { added, removed, unchanged }
+})
+const reputationConfigStatus = computed(() => {
+  const source = selectedNodeSource.value
+  if (!source || source.reputation_provider === 'none') return '未启用纯净度检测'
+  if (!source.reputation_api_key_ref) return '已启用，但缺少 API Key 引用'
+  if (source.reputation_api_key_ref.startsWith('env:')) return '使用服务器环境变量'
+  if (source.reputation_api_key_ref.startsWith('keymd:')) return '使用 key.md 标签引用'
+  return '使用自定义引用'
+})
 
 const columns = computed<Column[]>(() => [
   { key: 'account', label: '账号' },
@@ -764,10 +995,35 @@ function parseCountryList(raw: string): string[] {
     .filter(Boolean)
 }
 
+function cloneStrategy(strategy?: ProxySubscriptionStrategy): ProxySubscriptionStrategy {
+  const base = strategy || defaultStrategy()
+  return {
+    ...defaultStrategy(),
+    ...base,
+    preferred_countries: [...(base.preferred_countries || [])],
+    blocked_countries: [...(base.blocked_countries || [])]
+  }
+}
+
+function applyNodeStrategyDraft(strategy?: ProxySubscriptionStrategy) {
+  const next = cloneStrategy(strategy)
+  Object.assign(nodeStrategyDraft, next)
+  nodePreferredCountriesText.value = next.preferred_countries.join(',')
+  nodeBlockedCountriesText.value = next.blocked_countries.join(',')
+}
+
 function resetSubscriptionForm() {
   Object.assign(subscriptionForm, createSubscriptionForm())
   preferredCountriesText.value = ''
   blockedCountriesText.value = ''
+}
+
+function buildNodeStrategyPayload(): ProxySubscriptionStrategy {
+  return {
+    ...nodeStrategyDraft,
+    preferred_countries: parseCountryList(nodePreferredCountriesText.value),
+    blocked_countries: parseCountryList(nodeBlockedCountriesText.value)
+  }
 }
 
 function buildSubscriptionPayload() {
@@ -779,6 +1035,243 @@ function buildSubscriptionPayload() {
       blocked_countries: parseCountryList(blockedCountriesText.value)
     }
   }
+}
+
+function buildSubscriptionUpdatePayload(source: ProxySubscriptionSource, strategy = source.strategy) {
+  return {
+    name: source.name,
+    url: source.url,
+    source_type: source.source_type,
+    provider: source.provider,
+    sync_enabled: source.sync_enabled,
+    sync_interval_minutes: source.sync_interval_minutes,
+    strategy,
+    sidecar_enabled: source.sidecar_enabled,
+    runtime: source.runtime,
+    port_start: source.port_start,
+    port_end: source.port_end,
+    scan_enabled: source.scan_enabled,
+    scan_interval_minutes: source.scan_interval_minutes,
+    health_check_interval_minutes: source.health_check_interval_minutes,
+    reputation_provider: source.reputation_provider,
+    reputation_api_key_ref: source.reputation_api_key_ref,
+    status: source.status
+  }
+}
+
+function reasonCategory(reason: string) {
+  if (!reason) return ''
+  if (reason.includes('纯净度')) return '纯净度不足'
+  if (reason.includes('延迟')) return '延迟过高'
+  if (reason.includes('国家') || reason.includes('屏蔽')) return '国家策略'
+  if (reason.includes('最大导入')) return '数量上限'
+  if (reason.includes('休眠')) return '休眠中'
+  if (reason.includes('缺失')) return '订阅缺失'
+  if (reason.includes('sidecar')) return 'sidecar 配置'
+  if (reason.includes('备用')) return '备用保留'
+  if (reason.includes('选中')) return '已选中'
+  return '其它'
+}
+
+function sortNodeRows(rows: NodePreviewRow[]) {
+  const copy = [...rows]
+  if (nodeSortKey.value === 'score') {
+    return copy.sort((a, b) => b.score - a.score || a.node_key.localeCompare(b.node_key))
+  }
+  if (nodeSortKey.value === 'latency') {
+    return copy.sort((a, b) => (a.latency_ms ?? Number.MAX_SAFE_INTEGER) - (b.latency_ms ?? Number.MAX_SAFE_INTEGER) || b.score - a.score)
+  }
+  if (nodeSortKey.value === 'clean') {
+    return copy.sort((a, b) => (b.ip_clean_score ?? -1) - (a.ip_clean_score ?? -1) || b.score - a.score)
+  }
+  if (nodeSortKey.value === 'country') {
+    return copy.sort((a, b) => a.preview_country.localeCompare(b.preview_country) || b.score - a.score)
+  }
+  if (nodeSortKey.value === 'name') {
+    return copy.sort((a, b) => (a.name || a.server).localeCompare(b.name || b.server))
+  }
+  return copy
+}
+
+function nodeCountry(node: ProxySubscriptionNode) {
+  return (node.exit_country_code || node.country_hint || node.exit_country || '').trim().toUpperCase()
+}
+
+function nodeIsSleeping(node: ProxySubscriptionNode) {
+  return Boolean(node.sleep_until && new Date(node.sleep_until).getTime() > Date.now())
+}
+
+function countryListHas(country: string, list: string[]) {
+  return list.map(item => item.trim().toUpperCase()).includes(country.trim().toUpperCase())
+}
+
+function nodeBaseExclusionReason(node: ProxySubscriptionNode, strategy: ProxySubscriptionStrategy, source: ProxySubscriptionSource | null) {
+  const country = nodeCountry(node)
+  if (node.status === 'missing') return '订阅源最新扫描中已缺失'
+  if (source && node.sidecar_required && !source.sidecar_enabled) return '订阅源未启用 sidecar'
+  if (nodeIsSleeping(node)) return `节点休眠到 ${formatDate(node.sleep_until)}`
+  if (country && countryListHas(country, strategy.blocked_countries || [])) return `国家 ${country} 已屏蔽`
+  if (strategy.min_ip_clean_score > 0 && (node.ip_clean_score == null || node.ip_clean_score < strategy.min_ip_clean_score)) {
+    return node.ip_clean_score == null ? '缺少纯净度结果' : `纯净度 ${node.ip_clean_score} 低于 ${strategy.min_ip_clean_score}`
+  }
+  if (strategy.min_quality_score > 0 && node.score < strategy.min_quality_score) return `综合分 ${node.score} 低于 ${strategy.min_quality_score}`
+  if (strategy.max_latency_ms > 0 && node.latency_ms != null && node.latency_ms > strategy.max_latency_ms) {
+    return `延迟 ${node.latency_ms}ms 高于 ${strategy.max_latency_ms}ms`
+  }
+  return ''
+}
+
+function previewSubscriptionNodes(nodes: ProxySubscriptionNode[], rawStrategy: ProxySubscriptionStrategy, source: ProxySubscriptionSource | null): NodePreviewRow[] {
+  const strategy = {
+    ...cloneStrategy(rawStrategy),
+    preferred_countries: parseCountryList(nodePreferredCountriesText.value),
+    blocked_countries: parseCountryList(nodeBlockedCountriesText.value)
+  }
+  const baseRows = nodes.map((node, index) => ({
+    ...node,
+    preview_status: 'candidate' as NodePreviewStatus,
+    preview_reason: '符合基础阈值，未进入选中池',
+    preview_rank: index + 1,
+    preview_country: nodeCountry(node) || 'unknown'
+  }))
+  const eligible = baseRows.filter(row => {
+    const reason = nodeBaseExclusionReason(row, strategy, source)
+    if (reason) {
+      row.preview_status = row.status === 'missing' ? 'missing' : nodeIsSleeping(row) ? 'sleeping' : 'excluded'
+      row.preview_reason = reason
+      return false
+    }
+    return true
+  })
+  eligible.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score
+    return a.node_key.localeCompare(b.node_key)
+  })
+  const selectedKeys = new Set<string>()
+  const perCountry = new Map<string, number>()
+  let countryCount = 0
+  const normalizeCountry = (country: string) => country || 'unknown'
+  const canSelect = (row: NodePreviewRow) => {
+    const country = normalizeCountry(row.preview_country)
+    if (strategy.max_nodes_per_country > 0 && (perCountry.get(country) || 0) >= strategy.max_nodes_per_country) {
+      row.preview_reason = `国家 ${country} 已达到每国 ${strategy.max_nodes_per_country} 个上限`
+      return false
+    }
+    if ((perCountry.get(country) || 0) === 0 && strategy.max_country_count > 0 && countryCount >= strategy.max_country_count) {
+      row.preview_reason = `已达到最多 ${strategy.max_country_count} 个国家`
+      return false
+    }
+    return true
+  }
+  const selectRow = (row: NodePreviewRow, reason: string) => {
+    if (selectedKeys.size >= strategy.max_enabled_nodes) {
+      row.preview_reason = `已达到最大导入 ${strategy.max_enabled_nodes} 个`
+      return false
+    }
+    if (!canSelect(row)) return false
+    const country = normalizeCountry(row.preview_country)
+    selectedKeys.add(row.node_key)
+    if ((perCountry.get(country) || 0) === 0) countryCount++
+    perCountry.set(country, (perCountry.get(country) || 0) + 1)
+    row.preview_status = 'selected'
+    row.preview_reason = reason
+    return true
+  }
+  if (strategy.min_country_count > 1) {
+    for (const row of eligible) {
+      if (selectedKeys.size >= strategy.min_country_count) break
+      if ((perCountry.get(normalizeCountry(row.preview_country)) || 0) > 0) continue
+      selectRow(row, '为满足最低国家覆盖优先选中')
+    }
+  }
+  for (const row of eligible) {
+    if (selectedKeys.size >= strategy.max_enabled_nodes) break
+    if (selectedKeys.has(row.node_key)) continue
+    selectRow(row, '按分数和国家配额选中')
+  }
+  let standbyCount = 0
+  const markStandby = (row: NodePreviewRow) => {
+    if (standbyCount >= strategy.standby_nodes || selectedKeys.has(row.node_key) || row.preview_status !== 'candidate') return
+    row.preview_status = 'standby'
+    row.preview_reason = '作为替换候补保留'
+    standbyCount++
+  }
+  if (strategy.replace_same_country_first) {
+    for (const row of eligible) {
+      if ((perCountry.get(normalizeCountry(row.preview_country)) || 0) > 0) markStandby(row)
+      if (standbyCount >= strategy.standby_nodes) break
+    }
+  }
+  for (const row of eligible) {
+    markStandby(row)
+    if (standbyCount >= strategy.standby_nodes) break
+  }
+  eligible.forEach((row, index) => {
+    row.preview_rank = index + 1
+  })
+  return baseRows.sort((a, b) => {
+    const statusOrder: Record<NodePreviewStatus, number> = { selected: 1, standby: 2, candidate: 3, sleeping: 4, excluded: 5, missing: 6 }
+    if (statusOrder[a.preview_status] !== statusOrder[b.preview_status]) return statusOrder[a.preview_status] - statusOrder[b.preview_status]
+    if (a.score !== b.score) return b.score - a.score
+    return a.node_key.localeCompare(b.node_key)
+  })
+}
+
+function nodePreviewStatusLabel(status: NodePreviewStatus) {
+  const labels: Record<NodePreviewStatus, string> = {
+    selected: '可选中',
+    standby: '备用',
+    candidate: '候选',
+    excluded: '不可选',
+    sleeping: '休眠',
+    missing: '缺失'
+  }
+  return labels[status]
+}
+
+function nodePreviewBadgeClass(status: NodePreviewStatus) {
+  if (status === 'selected') return 'badge-success'
+  if (status === 'standby') return 'badge-warning'
+  return 'badge-gray'
+}
+
+function applyNodeStrategyPreset(preset: NodeStrategyPreset) {
+  if (preset === 'stable') {
+    nodeStrategyDraft.max_latency_ms = 1800
+    nodeStrategyDraft.min_quality_score = 70
+    nodeStrategyDraft.min_ip_clean_score = 70
+    nodeStrategyDraft.timeout_sleep_after = 2
+    nodeStrategyDraft.standby_nodes = Math.max(nodeStrategyDraft.standby_nodes, 3)
+    return
+  }
+  if (preset === 'speed') {
+    nodeStrategyDraft.max_latency_ms = 800
+    nodeStrategyDraft.min_quality_score = 65
+    nodeStrategyDraft.min_ip_clean_score = 40
+    nodeStrategyDraft.max_nodes_per_country = Math.max(nodeStrategyDraft.max_nodes_per_country, 5)
+    return
+  }
+  if (preset === 'coverage') {
+    nodeStrategyDraft.min_country_count = 4
+    nodeStrategyDraft.max_country_count = 10
+    nodeStrategyDraft.max_nodes_per_country = 2
+    nodeStrategyDraft.standby_nodes = Math.max(nodeStrategyDraft.standby_nodes, 4)
+    return
+  }
+  nodeStrategyDraft.scan_batch_size = 3
+  nodeStrategyDraft.max_probe_concurrency = 2
+  nodeStrategyDraft.scan_budget_minutes = 45
+  nodeStrategyDraft.scan_budget_max_minutes = 55
+  nodeStrategyDraft.resource_adaptive_scan = true
+}
+
+function formatScanResultSummary(result: Record<string, unknown> | undefined) {
+  if (!result) return '-'
+  const parsed = readScanNumber(result, 'parsed')
+  const saved = readScanNumber(result, 'saved')
+  const selected = readScanNumber(result, 'selected')
+  const errors = readScanNumber(result, 'errors')
+  return `解析 ${parsed ?? '-'} / 入库 ${saved ?? '-'} / 选中 ${selected ?? '-'} / 错误 ${errors ?? 0}`
 }
 
 function isScanning(id: number) {
@@ -1011,6 +1504,22 @@ async function loadSubscriptions() {
   subscriptions.value = await adminAPI.proxies.listProxySubscriptions()
 }
 
+async function loadNodeViewFromRoute() {
+  const id = Number(route.params.subscriptionId)
+  if (!id) return
+  const source = subscriptions.value.find(item => item.id === id)
+  if (!source) {
+    await loadSubscriptions()
+  }
+  const resolved = subscriptions.value.find(item => item.id === id)
+  if (resolved) {
+    await openSubscriptionNodes(resolved, false)
+  } else {
+    appStore.showError('订阅源不存在或已删除')
+    await router.replace('/admin/proxy-dispatch')
+  }
+}
+
 async function createSubscription() {
   try {
     await adminAPI.proxies.createProxySubscription(buildSubscriptionPayload())
@@ -1041,6 +1550,11 @@ async function scanSubscription(id: number) {
   try {
     scanResult.value = await adminAPI.proxies.scanProxySubscription(id)
     await loadSubscriptions()
+    if (selectedNodeSource.value?.id === id) {
+      const refreshed = subscriptions.value.find(source => source.id === id)
+      if (refreshed) selectedNodeSource.value = refreshed
+      subscriptionNodes.value = await adminAPI.proxies.listProxySubscriptionNodes(id)
+    }
     appStore.showSuccess(`扫描完成，已选中 ${scanResult.value.selected} 个节点`)
   } catch (error: any) {
     if (isBusyScanError(error)) {
@@ -1059,13 +1573,58 @@ async function scanSubscription(id: number) {
   }
 }
 
-async function openSubscriptionNodes(source: ProxySubscriptionSource) {
+async function openSubscriptionNodes(source: ProxySubscriptionSource, pushRoute = true) {
   try {
+    if (pushRoute) {
+      openingNodesRoute = true
+      try {
+        await router.push(`/admin/proxy-dispatch/subscriptions/${source.id}/nodes`)
+      } finally {
+        openingNodesRoute = false
+      }
+    }
     nodesDialogTitle.value = `${source.name} 节点`
+    selectedNodeSource.value = source
+    applyNodeStrategyDraft(source.strategy)
+    nodeStatusFilter.value = ''
     subscriptionNodes.value = await adminAPI.proxies.listProxySubscriptionNodes(source.id)
     showNodesDialog.value = true
   } catch (error: any) {
     appStore.showError(error?.message || '加载节点失败')
+  }
+}
+
+async function closeSubscriptionNodes() {
+  showNodesDialog.value = false
+  selectedNodeSource.value = null
+  subscriptionNodes.value = []
+  nodeStatusFilter.value = ''
+  nodeReasonFilter.value = ''
+  if (route.name === 'AdminProxyDispatchSubscriptionNodes') {
+    await router.push('/admin/proxy-dispatch')
+  }
+}
+
+async function saveNodeStrategy(scanAfterSave: boolean) {
+  if (!selectedNodeSource.value) return
+  const source = selectedNodeSource.value
+  savingNodeStrategy.value = true
+  try {
+    const payload = buildSubscriptionUpdatePayload(source, buildNodeStrategyPayload())
+    const updated = await adminAPI.proxies.updateProxySubscription(source.id, payload)
+    selectedNodeSource.value = updated
+    const index = subscriptions.value.findIndex(item => item.id === updated.id)
+    if (index >= 0) {
+      subscriptions.value.splice(index, 1, updated)
+    }
+    appStore.showSuccess(scanAfterSave ? '策略已保存，开始扫描' : '策略已保存')
+    if (scanAfterSave) {
+      await scanSubscription(updated.id)
+    }
+  } catch (error: any) {
+    appStore.showError(error?.message || '保存节点策略失败')
+  } finally {
+    savingNodeStrategy.value = false
   }
 }
 
@@ -1096,9 +1655,24 @@ function formatDate(value?: string | null) {
 
 onMounted(async () => {
   await Promise.all([loadSettings(), loadRelationships(), loadSubscriptions()])
+  await loadNodeViewFromRoute()
   await syncScanStatus()
   startScanStatusPolling()
 })
+
+watch(
+  () => route.params.subscriptionId,
+  async (id) => {
+    if (openingNodesRoute) return
+    if (id) {
+      await loadNodeViewFromRoute()
+    } else if (showNodesDialog.value) {
+      showNodesDialog.value = false
+      selectedNodeSource.value = null
+      subscriptionNodes.value = []
+    }
+  }
+)
 
 onUnmounted(() => {
   stopScanStatusPolling()

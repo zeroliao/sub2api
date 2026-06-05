@@ -174,6 +174,23 @@ export interface OpsRequestDetail {
   model?: string
   duration_ms?: number | null
   status_code?: number | null
+  first_token_ms?: number | null
+  auth_latency_ms?: number | null
+  routing_latency_ms?: number | null
+  upstream_latency_ms?: number | null
+  response_latency_ms?: number | null
+  time_to_first_token_ms?: number | null
+  upstream_status_code?: number | null
+  error_owner?: string
+  error_source?: string
+  inbound_endpoint?: string
+  upstream_endpoint?: string
+  requested_model?: string
+  upstream_model?: string
+  request_type?: number | null
+  channel_id?: number | null
+  model_mapping_chain?: string
+  billing_tier?: string
 
   error_id?: number | null
   phase?: string
@@ -184,6 +201,10 @@ export interface OpsRequestDetail {
   api_key_id?: number | null
   account_id?: number | null
   group_id?: number | null
+  user_email?: string
+  api_key_name?: string
+  account_name?: string
+  group_name?: string
 
   stream?: boolean
 }

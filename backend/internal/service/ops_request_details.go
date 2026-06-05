@@ -25,6 +25,24 @@ type OpsRequestDetail struct {
 	DurationMs *int `json:"duration_ms,omitempty"`
 	StatusCode *int `json:"status_code,omitempty"`
 
+	FirstTokenMs       *int64 `json:"first_token_ms,omitempty"`
+	AuthLatencyMs      *int64 `json:"auth_latency_ms,omitempty"`
+	RoutingLatencyMs   *int64 `json:"routing_latency_ms,omitempty"`
+	UpstreamLatencyMs  *int64 `json:"upstream_latency_ms,omitempty"`
+	ResponseLatencyMs  *int64 `json:"response_latency_ms,omitempty"`
+	TimeToFirstTokenMs *int64 `json:"time_to_first_token_ms,omitempty"`
+	UpstreamStatusCode *int   `json:"upstream_status_code,omitempty"`
+	ErrorOwner         string `json:"error_owner,omitempty"`
+	ErrorSource        string `json:"error_source,omitempty"`
+	InboundEndpoint    string `json:"inbound_endpoint,omitempty"`
+	UpstreamEndpoint   string `json:"upstream_endpoint,omitempty"`
+	RequestedModel     string `json:"requested_model,omitempty"`
+	UpstreamModel      string `json:"upstream_model,omitempty"`
+	RequestType        *int16 `json:"request_type,omitempty"`
+	ChannelID          *int64 `json:"channel_id,omitempty"`
+	ModelMappingChain  string `json:"model_mapping_chain,omitempty"`
+	BillingTier        string `json:"billing_tier,omitempty"`
+
 	// When Kind == "error", ErrorID links to /admin/ops/errors/:id.
 	ErrorID *int64 `json:"error_id,omitempty"`
 
@@ -36,6 +54,11 @@ type OpsRequestDetail struct {
 	APIKeyID  *int64 `json:"api_key_id,omitempty"`
 	AccountID *int64 `json:"account_id,omitempty"`
 	GroupID   *int64 `json:"group_id,omitempty"`
+
+	UserEmail   string `json:"user_email,omitempty"`
+	APIKeyName  string `json:"api_key_name,omitempty"`
+	AccountName string `json:"account_name,omitempty"`
+	GroupName   string `json:"group_name,omitempty"`
 
 	Stream bool `json:"stream"`
 }

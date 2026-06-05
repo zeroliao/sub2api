@@ -504,6 +504,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/proxy-dispatch/subscriptions/:subscriptionId/nodes',
+    name: 'AdminProxyDispatchSubscriptionNodes',
+    component: () => import('@/views/admin/ProxyDispatchView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Proxy Subscription Nodes',
+      titleKey: 'admin.proxyDispatch.title',
+      descriptionKey: 'admin.proxyDispatch.description'
+    }
+  },
+  {
     path: '/admin/redeem',
     name: 'AdminRedeem',
     component: () => import('@/views/admin/RedeemView.vue'),
