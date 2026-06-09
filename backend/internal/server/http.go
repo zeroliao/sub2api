@@ -18,7 +18,7 @@ import (
 	"github.com/google/wire"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck // keep existing h2c behavior until stdlib Protocols migration is adopted.
 )
 
 // ProviderSet 提供服务器层的依赖
