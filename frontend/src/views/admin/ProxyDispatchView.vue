@@ -196,9 +196,18 @@
         <div class="grid gap-3 md:grid-cols-4">
           <input v-model="subscriptionForm.name" class="input" placeholder="名称" />
           <input v-model="subscriptionForm.url" class="input md:col-span-2" placeholder="订阅 URL" />
-          <button class="btn btn-secondary" @click="resetSubscriptionForm">
-            {{ editingSubscriptionId ? '取消编辑' : '重置表单' }}
-          </button>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary flex-1" @click="resetSubscriptionForm">
+              {{ editingSubscriptionId ? '取消编辑' : '重置表单' }}
+            </button>
+            <button class="btn btn-primary flex-1" :disabled="savingSubscription" @click="saveSubscription">
+              {{ editingSubscriptionId ? '保存' : '新增' }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="editingSubscriptionId" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
+          正在编辑：{{ editingSubscriptionName }}。修改下方订阅策略指标后，点击“保存策略指标”或顶部“保存”生效。
         </div>
 
         <div v-if="activeScanningSourceID" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
@@ -235,7 +244,32 @@
           </button>
         </div>
 
-        <div v-if="!subscriptionMetricsCollapsed" class="grid gap-4 xl:grid-cols-2">
+        <div v-if="!subscriptionMetricsCollapsed" ref="subscriptionMetricsPanel" class="space-y-4">
+          <div class="flex flex-col gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-900 sm:flex-row sm:items-center sm:justify-between">
+            <div class="space-y-1 text-sm text-gray-600 dark:text-dark-200">
+              <div class="font-medium text-gray-900 dark:text-white">
+                {{ editingSubscriptionId ? `策略指标：${editingSubscriptionName}` : '策略指标尚未绑定到订阅源' }}
+              </div>
+              <div>
+                {{ editingSubscriptionId ? '修改后点击保存，下一次扫描会按新规则执行。' : '请先在下方订阅源列表点击“编辑策略”，再修改这些指标。' }}
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-secondary" type="button" @click="resetSubscriptionForm">
+                {{ editingSubscriptionId ? '取消编辑' : '重置表单' }}
+              </button>
+              <button
+                class="btn btn-primary"
+                type="button"
+                :disabled="savingSubscription || !editingSubscriptionId"
+                @click="saveSubscription"
+              >
+                {{ editingSubscriptionId ? '保存策略指标' : '先选择订阅源' }}
+              </button>
+            </div>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-2">
           <div class="space-y-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40">
             <div>
               <div class="text-sm font-medium text-gray-900 dark:text-white">接入与检测</div>
@@ -509,12 +543,47 @@
               </label>
             </div>
           </div>
+          </div>
+
+          <div class="sticky bottom-0 z-10 flex flex-col gap-3 rounded-lg border border-gray-200 bg-white/95 p-3 shadow-sm backdrop-blur dark:border-dark-700 dark:bg-dark-900/95 sm:flex-row sm:items-center sm:justify-between">
+            <div class="text-sm text-gray-600 dark:text-dark-200">
+              <template v-if="editingSubscriptionId">
+                正在保存到“{{ editingSubscriptionName }}”。策略指标保存后，下一次扫描会按新规则执行。
+              </template>
+              <template v-else>
+                先点击某个订阅源右侧的“编辑策略”，再修改并保存这些指标。
+              </template>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="btn btn-secondary" type="button" @click="resetSubscriptionForm">
+                {{ editingSubscriptionId ? '取消编辑' : '重置新增表单' }}
+              </button>
+              <button
+                class="btn btn-primary"
+                type="button"
+                :disabled="savingSubscription || !editingSubscriptionId"
+                @click="saveSubscription"
+              >
+                {{ editingSubscriptionId ? '保存策略指标' : '先选择订阅源' }}
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="divide-y divide-gray-200 rounded-lg border border-gray-200 dark:divide-dark-700 dark:border-dark-700">
-          <div v-for="source in subscriptions" :key="source.id" class="flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between">
+          <div
+            v-for="source in subscriptions"
+            :key="source.id"
+            :class="[
+              'flex flex-col gap-3 p-3 lg:flex-row lg:items-center lg:justify-between',
+              editingSubscriptionId === source.id ? 'bg-blue-50/70 ring-1 ring-blue-200 dark:bg-blue-950/20 dark:ring-blue-900/60' : ''
+            ]"
+          >
             <div class="min-w-0 space-y-1">
-              <div class="font-medium text-gray-900 dark:text-white">{{ source.name }}</div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="font-medium text-gray-900 dark:text-white">{{ source.name }}</span>
+                <span v-if="editingSubscriptionId === source.id" class="badge badge-primary">编辑中</span>
+              </div>
               <div class="truncate text-xs text-gray-500">{{ source.url }}</div>
               <div class="flex flex-wrap gap-2 text-xs text-gray-500">
                 <span>已选 {{ readScanNumber(source.last_scan_result, 'selected') ?? '-' }}</span>
@@ -530,7 +599,18 @@
               <div v-if="source.last_error" class="text-xs text-red-500">{{ source.last_error }}</div>
             </div>
             <div class="flex flex-wrap gap-2">
-              <button class="btn btn-sm btn-secondary" @click="editSubscription(source)">编辑</button>
+              <button
+                :class="['btn btn-sm', editingSubscriptionId === source.id ? 'btn-primary' : 'btn-secondary']"
+                @click="editSubscription(source)"
+              >
+                {{ editingSubscriptionId === source.id ? '编辑中' : '编辑基础' }}
+              </button>
+              <button
+                :class="['btn btn-sm', editingSubscriptionId === source.id ? 'btn-primary' : 'btn-secondary']"
+                @click="editSubscriptionStrategy(source)"
+              >
+                {{ editingSubscriptionId === source.id ? '正在编辑策略' : '编辑策略' }}
+              </button>
               <button class="btn btn-sm btn-secondary" @click="syncSubscription(source.id)">同步预览</button>
               <button class="btn btn-sm btn-secondary" :disabled="isScanning(source.id)" @click="scanSubscription(source.id)">
                 <Icon name="refresh" size="sm" :class="isScanning(source.id) ? 'animate-spin mr-1' : 'mr-1'" />
@@ -544,10 +624,10 @@
 
         <div class="flex flex-col gap-3 border-t border-gray-200 pt-4 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
           <div class="text-xs text-gray-500 dark:text-dark-300">
-            {{ editingSubscriptionId ? '正在编辑已有订阅源，保存后会更新上面的订阅策略指标。' : '创建订阅源时会一并保存上面的订阅策略指标。' }}
+            {{ editingSubscriptionId ? `正在编辑“${editingSubscriptionName}”，保存后会更新上面的订阅策略指标。` : '创建新订阅源时会一并保存上面的订阅策略指标；编辑已有订阅源请点击列表里的“编辑策略”。' }}
           </div>
-          <button class="btn btn-primary" @click="saveSubscription">
-            {{ editingSubscriptionId ? '保存订阅' : '新增订阅' }}
+          <button class="btn btn-primary" :disabled="savingSubscription" @click="saveSubscription">
+            {{ editingSubscriptionId ? '保存订阅和策略' : '新增订阅' }}
           </button>
         </div>
       </div>
@@ -785,7 +865,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
@@ -877,6 +957,8 @@ const showHistory = ref(false)
 const showNodesDialog = ref(false)
 const nodesDialogTitle = ref('订阅节点')
 const selectedNodeSource = ref<ProxySubscriptionSource | null>(null)
+const subscriptionMetricsPanel = ref<HTMLElement | null>(null)
+const savingSubscription = ref(false)
 const savingNodeStrategy = ref(false)
 const nodeStatusFilter = ref('')
 const nodeReasonFilter = ref('')
@@ -913,6 +995,11 @@ const activeScanningSourceID = computed(() => scanningSubscriptionIds.value[0] |
 const activeScanningName = computed(() => {
   const source = activeScanningSource.value
   return source?.name || serverScanStatus.value?.source_name || `订阅源 #${serverScanStatus.value?.source_id || ''}`
+})
+const editingSubscriptionName = computed(() => {
+  if (!editingSubscriptionId.value) return ''
+  const source = subscriptions.value.find(item => item.id === editingSubscriptionId.value)
+  return source?.name || subscriptionForm.name || `订阅源 #${editingSubscriptionId.value}`
 })
 const subscriptionMetricsSummary = computed(() => [
   { label: '活跃出口', value: String(subscriptionForm.strategy.max_active_sidecar_nodes) },
@@ -1057,6 +1144,13 @@ function editSubscription(source: ProxySubscriptionSource) {
   preferredCountriesText.value = strategy.preferred_countries.join(',')
   blockedCountriesText.value = strategy.blocked_countries.join(',')
   subscriptionMetricsCollapsed.value = false
+}
+
+async function editSubscriptionStrategy(source: ProxySubscriptionSource) {
+  editSubscription(source)
+  subscriptionMetricsCollapsed.value = false
+  await nextTick()
+  subscriptionMetricsPanel.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function buildNodeStrategyPayload(): ProxySubscriptionStrategy {
@@ -1562,6 +1656,8 @@ async function loadNodeViewFromRoute() {
 }
 
 async function saveSubscription() {
+  if (savingSubscription.value) return
+  savingSubscription.value = true
   try {
     if (editingSubscriptionId.value) {
       await adminAPI.proxies.updateProxySubscription(editingSubscriptionId.value, buildSubscriptionPayload())
@@ -1574,6 +1670,8 @@ async function saveSubscription() {
     appStore.showSuccess(savedMessage)
   } catch (error: any) {
     appStore.showError(error?.message || '保存订阅源失败')
+  } finally {
+    savingSubscription.value = false
   }
 }
 
