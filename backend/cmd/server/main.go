@@ -25,7 +25,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
+	"golang.org/x/net/http2/h2c" //nolint:staticcheck // keep h2c support until stdlib Protocols migration is available across our Go targets.
 )
 
 //go:embed VERSION
