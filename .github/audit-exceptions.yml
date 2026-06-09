@@ -35,3 +35,10 @@ exceptions:
     mitigation: "Proxy configuration not user-controlled; upgrade when axios releases fix"
     expires_on: "2026-07-10"
     owner: "security@your-domain"
+  - package: js-cookie
+    advisory: "GHSA-qjx8-664m-686j"
+    severity: high
+    reason: "Transitive dependency from @lobehub UI/icon stack and Vue test tooling; project code does not use js-cookie directly"
+    mitigation: "No project-owned cookie handling depends on js-cookie; monitor upstream dependency upgrades and remove the exception once patched"
+    expires_on: "2026-07-10"
+    owner: "security@your-domain"
