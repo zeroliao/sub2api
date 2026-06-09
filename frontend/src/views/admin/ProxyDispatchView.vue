@@ -196,7 +196,9 @@
         <div class="grid gap-3 md:grid-cols-4">
           <input v-model="subscriptionForm.name" class="input" placeholder="名称" />
           <input v-model="subscriptionForm.url" class="input md:col-span-2" placeholder="订阅 URL" />
-          <button class="btn btn-primary" @click="createSubscription">新增订阅</button>
+          <button class="btn btn-secondary" @click="resetSubscriptionForm">
+            {{ editingSubscriptionId ? '取消编辑' : '重置表单' }}
+          </button>
         </div>
 
         <div v-if="activeScanningSourceID" class="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
@@ -528,6 +530,7 @@
               <div v-if="source.last_error" class="text-xs text-red-500">{{ source.last_error }}</div>
             </div>
             <div class="flex flex-wrap gap-2">
+              <button class="btn btn-sm btn-secondary" @click="editSubscription(source)">编辑</button>
               <button class="btn btn-sm btn-secondary" @click="syncSubscription(source.id)">同步预览</button>
               <button class="btn btn-sm btn-secondary" :disabled="isScanning(source.id)" @click="scanSubscription(source.id)">
                 <Icon name="refresh" size="sm" :class="isScanning(source.id) ? 'animate-spin mr-1' : 'mr-1'" />
@@ -537,6 +540,15 @@
               <button class="btn btn-sm btn-danger" @click="deleteSubscription(source.id)">删除</button>
             </div>
           </div>
+        </div>
+
+        <div class="flex flex-col gap-3 border-t border-gray-200 pt-4 dark:border-dark-700 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-xs text-gray-500 dark:text-dark-300">
+            {{ editingSubscriptionId ? '正在编辑已有订阅源，保存后会更新上面的订阅策略指标。' : '创建订阅源时会一并保存上面的订阅策略指标。' }}
+          </div>
+          <button class="btn btn-primary" @click="saveSubscription">
+            {{ editingSubscriptionId ? '保存订阅' : '新增订阅' }}
+          </button>
         </div>
       </div>
     </BaseDialog>
@@ -874,6 +886,7 @@ const preferredCountriesText = ref('')
 const blockedCountriesText = ref('')
 const nodePreferredCountriesText = ref('')
 const nodeBlockedCountriesText = ref('')
+const editingSubscriptionId = ref<number | null>(null)
 const scanningSubscriptionIds = ref<number[]>([])
 const subscriptionMetricsCollapsed = ref(true)
 const scanStartedAtMap = reactive<Record<number, number>>({})
@@ -1016,6 +1029,34 @@ function resetSubscriptionForm() {
   Object.assign(subscriptionForm, createSubscriptionForm())
   preferredCountriesText.value = ''
   blockedCountriesText.value = ''
+  editingSubscriptionId.value = null
+}
+
+function editSubscription(source: ProxySubscriptionSource) {
+  editingSubscriptionId.value = source.id
+  const strategy = cloneStrategy(source.strategy)
+  Object.assign(subscriptionForm, {
+    name: source.name,
+    url: source.url,
+    source_type: source.source_type,
+    provider: source.provider,
+    sync_enabled: source.sync_enabled,
+    sync_interval_minutes: source.sync_interval_minutes,
+    status: source.status,
+    sidecar_enabled: source.sidecar_enabled,
+    runtime: source.runtime,
+    port_start: source.port_start,
+    port_end: source.port_end,
+    scan_enabled: source.scan_enabled,
+    scan_interval_minutes: source.scan_interval_minutes,
+    health_check_interval_minutes: source.health_check_interval_minutes,
+    reputation_provider: source.reputation_provider,
+    reputation_api_key_ref: source.reputation_api_key_ref || '',
+    strategy
+  })
+  preferredCountriesText.value = strategy.preferred_countries.join(',')
+  blockedCountriesText.value = strategy.blocked_countries.join(',')
+  subscriptionMetricsCollapsed.value = false
 }
 
 function buildNodeStrategyPayload(): ProxySubscriptionStrategy {
@@ -1520,14 +1561,19 @@ async function loadNodeViewFromRoute() {
   }
 }
 
-async function createSubscription() {
+async function saveSubscription() {
   try {
-    await adminAPI.proxies.createProxySubscription(buildSubscriptionPayload())
+    if (editingSubscriptionId.value) {
+      await adminAPI.proxies.updateProxySubscription(editingSubscriptionId.value, buildSubscriptionPayload())
+    } else {
+      await adminAPI.proxies.createProxySubscription(buildSubscriptionPayload())
+    }
+    const savedMessage = editingSubscriptionId.value ? '订阅源已保存' : '订阅源已新增'
     resetSubscriptionForm()
     await loadSubscriptions()
-    appStore.showSuccess('订阅源已新增')
+    appStore.showSuccess(savedMessage)
   } catch (error: any) {
-    appStore.showError(error?.message || '新增订阅源失败')
+    appStore.showError(error?.message || '保存订阅源失败')
   }
 }
 
