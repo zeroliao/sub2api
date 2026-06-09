@@ -118,7 +118,7 @@ func runSetupServer() {
 
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           h2c.NewHandler(r, &http2.Server{}),
+		Handler:           h2c.NewHandler(r, &http2.Server{}), //nolint:staticcheck // keep h2c support until stdlib Protocols migration is available across our Go targets.
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
