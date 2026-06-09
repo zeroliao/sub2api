@@ -29,7 +29,7 @@
 
 ## 工具链
 
-- Go 版本：`1.26.3`（见 `backend/go.mod`）。
+- Go 版本：`1.26.4`（见 `backend/go.mod`）。
 - 前端：Node + pnpm、Vue 3、Vite、TypeScript、Vitest。
 - 后端测试和构建通常在 `backend/` 下运行。
 - 前端测试和构建通常在 `frontend/` 下运行。
