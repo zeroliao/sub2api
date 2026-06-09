@@ -535,77 +535,77 @@ type ProxyImportConfirmResult struct {
 }
 
 type ProxySubscriptionSource struct {
-	ID                  int64      `json:"id"`
-	Name                string     `json:"name"`
-	URL                 string     `json:"url"`
-	SourceType          string     `json:"source_type"`
-	Provider            string     `json:"provider,omitempty"`
-	SyncEnabled         bool       `json:"sync_enabled"`
-	SyncIntervalMinutes int        `json:"sync_interval_minutes"`
-	Strategy            ProxySubscriptionStrategy `json:"strategy"`
-	SidecarEnabled      bool       `json:"sidecar_enabled"`
-	Runtime             string     `json:"runtime"`
-	PortStart           int        `json:"port_start"`
-	PortEnd             int        `json:"port_end"`
-	ScanEnabled         bool       `json:"scan_enabled"`
-	ScanIntervalMinutes int        `json:"scan_interval_minutes"`
-	HealthCheckIntervalMinutes int  `json:"health_check_interval_minutes"`
-	ReputationProvider  string     `json:"reputation_provider"`
-	ReputationAPIKeyRef string     `json:"reputation_api_key_ref,omitempty"`
-	LastSyncedAt        *time.Time `json:"last_synced_at,omitempty"`
-	LastScanAt          *time.Time `json:"last_scan_at,omitempty"`
-	LastScanResult      map[string]any `json:"last_scan_result,omitempty"`
-	LastError           string     `json:"last_error,omitempty"`
-	Status              string     `json:"status"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                         int64                     `json:"id"`
+	Name                       string                    `json:"name"`
+	URL                        string                    `json:"url"`
+	SourceType                 string                    `json:"source_type"`
+	Provider                   string                    `json:"provider,omitempty"`
+	SyncEnabled                bool                      `json:"sync_enabled"`
+	SyncIntervalMinutes        int                       `json:"sync_interval_minutes"`
+	Strategy                   ProxySubscriptionStrategy `json:"strategy"`
+	SidecarEnabled             bool                      `json:"sidecar_enabled"`
+	Runtime                    string                    `json:"runtime"`
+	PortStart                  int                       `json:"port_start"`
+	PortEnd                    int                       `json:"port_end"`
+	ScanEnabled                bool                      `json:"scan_enabled"`
+	ScanIntervalMinutes        int                       `json:"scan_interval_minutes"`
+	HealthCheckIntervalMinutes int                       `json:"health_check_interval_minutes"`
+	ReputationProvider         string                    `json:"reputation_provider"`
+	ReputationAPIKeyRef        string                    `json:"reputation_api_key_ref,omitempty"`
+	LastSyncedAt               *time.Time                `json:"last_synced_at,omitempty"`
+	LastScanAt                 *time.Time                `json:"last_scan_at,omitempty"`
+	LastScanResult             map[string]any            `json:"last_scan_result,omitempty"`
+	LastError                  string                    `json:"last_error,omitempty"`
+	Status                     string                    `json:"status"`
+	CreatedAt                  time.Time                 `json:"created_at"`
+	UpdatedAt                  time.Time                 `json:"updated_at"`
 }
 
 type ProxySubscriptionSourceInput struct {
-	Name                string `json:"name"`
-	URL                 string `json:"url"`
-	SourceType          string `json:"source_type"`
-	Provider            string `json:"provider"`
-	SyncEnabled         *bool  `json:"sync_enabled"`
-	SyncIntervalMinutes int    `json:"sync_interval_minutes"`
-	Strategy            ProxySubscriptionStrategy `json:"strategy"`
-	SidecarEnabled      *bool  `json:"sidecar_enabled"`
-	Runtime             string `json:"runtime"`
-	PortStart           int    `json:"port_start"`
-	PortEnd             int    `json:"port_end"`
-	ScanEnabled         *bool  `json:"scan_enabled"`
-	ScanIntervalMinutes int    `json:"scan_interval_minutes"`
-	HealthCheckIntervalMinutes int `json:"health_check_interval_minutes"`
-	ReputationProvider  string `json:"reputation_provider"`
-	ReputationAPIKeyRef string `json:"reputation_api_key_ref"`
-	Status              string `json:"status"`
+	Name                       string                    `json:"name"`
+	URL                        string                    `json:"url"`
+	SourceType                 string                    `json:"source_type"`
+	Provider                   string                    `json:"provider"`
+	SyncEnabled                *bool                     `json:"sync_enabled"`
+	SyncIntervalMinutes        int                       `json:"sync_interval_minutes"`
+	Strategy                   ProxySubscriptionStrategy `json:"strategy"`
+	SidecarEnabled             *bool                     `json:"sidecar_enabled"`
+	Runtime                    string                    `json:"runtime"`
+	PortStart                  int                       `json:"port_start"`
+	PortEnd                    int                       `json:"port_end"`
+	ScanEnabled                *bool                     `json:"scan_enabled"`
+	ScanIntervalMinutes        int                       `json:"scan_interval_minutes"`
+	HealthCheckIntervalMinutes int                       `json:"health_check_interval_minutes"`
+	ReputationProvider         string                    `json:"reputation_provider"`
+	ReputationAPIKeyRef        string                    `json:"reputation_api_key_ref"`
+	Status                     string                    `json:"status"`
 }
 
 type ProxySubscriptionStrategy struct {
-	MaxParsedNodes        int      `json:"max_parsed_nodes"`
-	MaxEnabledNodes       int      `json:"max_enabled_nodes"`
-	MaxActiveSidecarNodes int      `json:"max_active_sidecar_nodes"`
-	MaxProbeConcurrency   int      `json:"max_probe_concurrency"`
-	ScanBatchSize         int      `json:"scan_batch_size"`
-	StandbyNodes          int      `json:"standby_nodes"`
-	MinCountryCount       int      `json:"min_country_count"`
-	MaxCountryCount       int      `json:"max_country_count"`
-	MaxNodesPerCountry    int      `json:"max_nodes_per_country"`
-	PreferredCountries    []string `json:"preferred_countries"`
-	BlockedCountries      []string `json:"blocked_countries"`
-	MaxLatencyMs          int      `json:"max_latency_ms"`
-	MinIPCleanScore       int      `json:"min_ip_clean_score"`
-	MinQualityScore       int      `json:"min_quality_score"`
-	SelectionMode         string   `json:"selection_mode"`
-	ReputationCacheHours  int      `json:"reputation_cache_hours"`
-	ScanBudgetMinutes     int      `json:"scan_budget_minutes"`
-	ScanBudgetMaxMinutes  int      `json:"scan_budget_max_minutes"`
-	ResourceAdaptiveScan  bool     `json:"resource_adaptive_scan"`
-	MinFreeMemoryMB       int      `json:"min_free_memory_mb"`
-	PauseFreeMemoryMB     int      `json:"pause_free_memory_mb"`
-	TimeoutSleepAfter     int      `json:"timeout_sleep_after"`
-	SleepMinutes          int      `json:"sleep_minutes"`
-	ReplaceSameCountryFirst bool   `json:"replace_same_country_first"`
+	MaxParsedNodes          int      `json:"max_parsed_nodes"`
+	MaxEnabledNodes         int      `json:"max_enabled_nodes"`
+	MaxActiveSidecarNodes   int      `json:"max_active_sidecar_nodes"`
+	MaxProbeConcurrency     int      `json:"max_probe_concurrency"`
+	ScanBatchSize           int      `json:"scan_batch_size"`
+	StandbyNodes            int      `json:"standby_nodes"`
+	MinCountryCount         int      `json:"min_country_count"`
+	MaxCountryCount         int      `json:"max_country_count"`
+	MaxNodesPerCountry      int      `json:"max_nodes_per_country"`
+	PreferredCountries      []string `json:"preferred_countries"`
+	BlockedCountries        []string `json:"blocked_countries"`
+	MaxLatencyMs            int      `json:"max_latency_ms"`
+	MinIPCleanScore         int      `json:"min_ip_clean_score"`
+	MinQualityScore         int      `json:"min_quality_score"`
+	SelectionMode           string   `json:"selection_mode"`
+	ReputationCacheHours    int      `json:"reputation_cache_hours"`
+	ScanBudgetMinutes       int      `json:"scan_budget_minutes"`
+	ScanBudgetMaxMinutes    int      `json:"scan_budget_max_minutes"`
+	ResourceAdaptiveScan    bool     `json:"resource_adaptive_scan"`
+	MinFreeMemoryMB         int      `json:"min_free_memory_mb"`
+	PauseFreeMemoryMB       int      `json:"pause_free_memory_mb"`
+	TimeoutSleepAfter       int      `json:"timeout_sleep_after"`
+	SleepMinutes            int      `json:"sleep_minutes"`
+	ReplaceSameCountryFirst bool     `json:"replace_same_country_first"`
 }
 
 type ProxySubscriptionNode struct {
@@ -640,17 +640,17 @@ type ProxySubscriptionNode struct {
 }
 
 type ProxySubscriptionScanResult struct {
-	SourceID         int64  `json:"source_id"`
-	Total           int    `json:"total"`
-	Parsed          int    `json:"parsed"`
-	Saved           int    `json:"saved"`
-	Selected        int    `json:"selected"`
-	SidecarRequired int    `json:"sidecar_required"`
-	DirectImportable int   `json:"direct_importable"`
-	Skipped         int    `json:"skipped"`
-	Errors          []string `json:"errors,omitempty"`
-	Strategy        ProxySubscriptionStrategy `json:"strategy"`
-	ScannedAt       time.Time `json:"scanned_at"`
+	SourceID         int64                     `json:"source_id"`
+	Total            int                       `json:"total"`
+	Parsed           int                       `json:"parsed"`
+	Saved            int                       `json:"saved"`
+	Selected         int                       `json:"selected"`
+	SidecarRequired  int                       `json:"sidecar_required"`
+	DirectImportable int                       `json:"direct_importable"`
+	Skipped          int                       `json:"skipped"`
+	Errors           []string                  `json:"errors,omitempty"`
+	Strategy         ProxySubscriptionStrategy `json:"strategy"`
+	ScannedAt        time.Time                 `json:"scanned_at"`
 }
 
 type ProxySubscriptionScanStatus struct {
@@ -3162,7 +3162,7 @@ func (s *adminServiceImpl) ListProxiesWithAccountCount(ctx context.Context, page
 			proxies[i].QualityStatus = proxies[i].Proxy.QualityStatus
 		}
 		if proxies[i].IPAddress == "" {
-			proxies[i].IPAddress = proxies[i].Proxy.ExitIP
+			proxies[i].IPAddress = proxies[i].ExitIP
 		}
 	}
 	s.attachProxyLatency(ctx, proxies)
@@ -3194,7 +3194,7 @@ func (s *adminServiceImpl) GetAllProxiesWithAccountCount(ctx context.Context) ([
 			proxies[i].QualityStatus = proxies[i].Proxy.QualityStatus
 		}
 		if proxies[i].IPAddress == "" {
-			proxies[i].IPAddress = proxies[i].Proxy.ExitIP
+			proxies[i].IPAddress = proxies[i].ExitIP
 		}
 	}
 	s.attachProxyLatency(ctx, proxies)
@@ -6862,7 +6862,7 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 }
 
 func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, info *ProxyLatencyInfo) {
-	if s.proxyLatencyCache == nil || info == nil {
+	if s == nil || s.proxyLatencyCache == nil || info == nil {
 		if s != nil && s.entClient != nil && info != nil {
 			status := ProxyQualityHealthy
 			if !info.Success {
@@ -6895,7 +6895,7 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 	if err := s.proxyLatencyCache.SetProxyLatency(ctx, proxyID, &merged); err != nil {
 		logger.LegacyPrintf("service.admin", "Warning: store proxy latency cache failed: %v", err)
 	}
-	if s != nil && s.entClient != nil {
+	if s.entClient != nil {
 		status := ProxyQualityHealthy
 		if !merged.Success {
 			status = ProxyQualityDegraded

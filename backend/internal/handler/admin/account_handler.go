@@ -2246,7 +2246,7 @@ func doModelsPreviewRequest(req *http.Request) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, infraerrors.New(http.StatusBadGateway, "FETCH_MODELS_FAILED", "failed to fetch upstream models")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 	if err != nil {
