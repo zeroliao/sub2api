@@ -899,6 +899,16 @@ export interface ProxySubscriptionScanStatus {
   scan_budget_max_minutes?: number
 }
 
+export interface AbuseIPDBAPIKeySettings {
+  configured: boolean
+  source: string
+}
+
+export interface AbuseIPDBAPIKeySettingsInput {
+  api_key?: string
+  clear?: boolean
+}
+
 export interface ProxyAccountSummary {
   id: number
   name: string

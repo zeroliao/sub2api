@@ -621,6 +621,14 @@ func (s *stubAdminService) UpdateProxyDispatchSettings(ctx context.Context, inpu
 	return input, nil
 }
 
+func (s *stubAdminService) GetAbuseIPDBAPIKeySettings(ctx context.Context) (*service.AbuseIPDBAPIKeySettings, error) {
+	return &service.AbuseIPDBAPIKeySettings{}, nil
+}
+
+func (s *stubAdminService) UpdateAbuseIPDBAPIKeySettings(ctx context.Context, input *service.AbuseIPDBAPIKeySettingsInput) (*service.AbuseIPDBAPIKeySettings, error) {
+	return &service.AbuseIPDBAPIKeySettings{Configured: input != nil && input.APIKey != ""}, nil
+}
+
 func (s *stubAdminService) PreviewProxyImport(ctx context.Context, input service.ProxyImportPreviewInput) (*service.ProxyImportPreview, error) {
 	return &service.ProxyImportPreview{}, nil
 }

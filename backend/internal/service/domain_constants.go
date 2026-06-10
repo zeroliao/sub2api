@@ -32,6 +32,7 @@ const (
 	DirectFallbackGlobal     = "global"
 
 	SettingKeyProxyDispatchSettings = "proxy_dispatch_settings"
+	SettingKeyAbuseIPDBAPIKey       = "abuseipdb_api_key"
 )
 
 // Role constants

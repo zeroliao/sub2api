@@ -403,6 +403,8 @@ func registerProxyDispatchRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		dispatch.GET("/proxies/:id/accounts", h.Admin.Proxy.GetProxyAccounts)
 		dispatch.GET("/settings", h.Admin.Proxy.GetProxyDispatchSettings)
 		dispatch.PUT("/settings", h.Admin.Proxy.UpdateProxyDispatchSettings)
+		dispatch.GET("/abuseipdb-api-key", h.Admin.Proxy.GetAbuseIPDBAPIKeySettings)
+		dispatch.PUT("/abuseipdb-api-key", h.Admin.Proxy.UpdateAbuseIPDBAPIKeySettings)
 	}
 }
 

@@ -122,6 +122,8 @@ type AdminService interface {
 	GetAccountProxyHistory(ctx context.Context, accountID int64) ([]AccountProxyBinding, error)
 	GetProxyDispatchSettings(ctx context.Context) (*ProxyDispatchSettings, error)
 	UpdateProxyDispatchSettings(ctx context.Context, input *ProxyDispatchSettings) (*ProxyDispatchSettings, error)
+	GetAbuseIPDBAPIKeySettings(ctx context.Context) (*AbuseIPDBAPIKeySettings, error)
+	UpdateAbuseIPDBAPIKeySettings(ctx context.Context, input *AbuseIPDBAPIKeySettingsInput) (*AbuseIPDBAPIKeySettings, error)
 	PreviewProxyImport(ctx context.Context, input ProxyImportPreviewInput) (*ProxyImportPreview, error)
 	ConfirmProxyImport(ctx context.Context, input ProxyImportConfirmInput) (*ProxyImportConfirmResult, error)
 	BatchHealthCheckProxies(ctx context.Context, ids []int64) ([]ProxyTestResult, error)
@@ -482,6 +484,16 @@ type ProxyRelationship struct {
 type ProxyDispatchSettings struct {
 	DirectFallbackMode string `json:"direct_fallback_mode"`
 	AutoAssignEnabled  bool   `json:"auto_assign_enabled"`
+}
+
+type AbuseIPDBAPIKeySettings struct {
+	Configured bool   `json:"configured"`
+	Source     string `json:"source"`
+}
+
+type AbuseIPDBAPIKeySettingsInput struct {
+	APIKey string `json:"api_key"`
+	Clear  bool   `json:"clear"`
 }
 
 type ProxyImportPreviewInput struct {
@@ -3576,6 +3588,41 @@ func (s *adminServiceImpl) UpdateProxyDispatchSettings(ctx context.Context, inpu
 	return settings, nil
 }
 
+func (s *adminServiceImpl) GetAbuseIPDBAPIKeySettings(ctx context.Context) (*AbuseIPDBAPIKeySettings, error) {
+	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
+		return &AbuseIPDBAPIKeySettings{}, nil
+	}
+	value, _ := s.settingService.settingRepo.GetValue(ctx, SettingKeyAbuseIPDBAPIKey)
+	if strings.TrimSpace(value) != "" {
+		return &AbuseIPDBAPIKeySettings{Configured: true, Source: "database"}, nil
+	}
+	if strings.TrimSpace(os.Getenv("ABUSEIPDB_API_KEY")) != "" {
+		return &AbuseIPDBAPIKeySettings{Configured: true, Source: "environment"}, nil
+	}
+	return &AbuseIPDBAPIKeySettings{}, nil
+}
+
+func (s *adminServiceImpl) UpdateAbuseIPDBAPIKeySettings(ctx context.Context, input *AbuseIPDBAPIKeySettingsInput) (*AbuseIPDBAPIKeySettings, error) {
+	if s == nil || s.settingService == nil || s.settingService.settingRepo == nil {
+		return nil, infraerrors.ServiceUnavailable("SETTING_UNAVAILABLE", "setting service unavailable")
+	}
+	if input == nil {
+		input = &AbuseIPDBAPIKeySettingsInput{}
+	}
+	key := strings.TrimSpace(input.APIKey)
+	switch {
+	case input.Clear:
+		if err := s.settingService.settingRepo.Delete(ctx, SettingKeyAbuseIPDBAPIKey); err != nil {
+			return nil, err
+		}
+	case key != "":
+		if err := s.settingService.settingRepo.Set(ctx, SettingKeyAbuseIPDBAPIKey, key); err != nil {
+			return nil, err
+		}
+	}
+	return s.GetAbuseIPDBAPIKeySettings(ctx)
+}
+
 func (s *adminServiceImpl) PreviewProxyImport(ctx context.Context, input ProxyImportPreviewInput) (*ProxyImportPreview, error) {
 	content := strings.TrimSpace(input.Content)
 	sourceDetected := "text"
@@ -4799,7 +4846,7 @@ func (s *adminServiceImpl) lookupProxySubscriptionNodeReputation(ctx context.Con
 		return cached, nil
 	}
 
-	apiKey, err := resolveProxySubscriptionAPIKey(source.ReputationAPIKeyRef)
+	apiKey, err := s.resolveProxySubscriptionAPIKey(ctx, source.ReputationAPIKeyRef)
 	if err != nil {
 		return nil, err
 	}
@@ -4847,14 +4894,25 @@ func resolveProxySubscriptionHostIP(ctx context.Context, host string) (string, e
 	return "", errors.New("host resolved to no IPs")
 }
 
-func resolveProxySubscriptionAPIKey(ref string) (string, error) {
+func (s *adminServiceImpl) resolveProxySubscriptionAPIKey(ctx context.Context, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
+		if s != nil && s.settingService != nil && s.settingService.settingRepo != nil {
+			if value, err := s.settingService.settingRepo.GetValue(ctx, SettingKeyAbuseIPDBAPIKey); err == nil {
+				if value = strings.TrimSpace(value); value != "" {
+					return value, nil
+				}
+			}
+		}
 		if value := strings.TrimSpace(os.Getenv("ABUSEIPDB_API_KEY")); value != "" {
 			return value, nil
 		}
 		ref = "keymd:AbuseIPDB API Key"
 	}
+	return resolveProxySubscriptionAPIKeyRef(ref)
+}
+
+func resolveProxySubscriptionAPIKeyRef(ref string) (string, error) {
 	switch {
 	case strings.HasPrefix(strings.ToLower(ref), "env:"):
 		key := strings.TrimSpace(ref[4:])

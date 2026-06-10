@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   OPENAI_CC_SWITCH_CODEX_MODEL,
-  buildCcSwitchImportDeeplink
+  buildCcSwitchImportDeeplink,
+  withOpenAIV1BaseUrl
 } from '@/utils/ccswitchImport'
 import type { GroupPlatform } from '@/types'
 
@@ -29,9 +30,19 @@ describe('ccswitchImport utils', () => {
 
     expect(params.get('resource')).toBe('provider')
     expect(params.get('app')).toBe('codex')
-    expect(params.get('endpoint')).toBe(baseInput.baseUrl)
+    expect(params.get('homepage')).toBe(baseInput.baseUrl)
+    expect(params.get('endpoint')).toBe(`${baseInput.baseUrl}/v1`)
     expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
     expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
+  })
+
+  it.each([
+    ['https://api.example.com', 'https://api.example.com/v1'],
+    ['https://api.example.com/', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1/', 'https://api.example.com/v1']
+  ])('normalizes OpenAI import endpoint %s', (input, expected) => {
+    expect(withOpenAIV1BaseUrl(input)).toBe(expected)
   })
 
   it.each([

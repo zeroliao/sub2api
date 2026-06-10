@@ -16,6 +16,8 @@ import type {
   ProxySubscriptionNode,
   ProxySubscriptionScanResult,
   ProxySubscriptionScanStatus,
+  AbuseIPDBAPIKeySettings,
+  AbuseIPDBAPIKeySettingsInput,
   CreateProxyRequest,
   UpdateProxyRequest,
   PaginatedResponse,
@@ -340,6 +342,16 @@ export async function updateProxyDispatchSettings(settings: ProxyDispatchSetting
   return data
 }
 
+export async function getAbuseIPDBAPIKeySettings(): Promise<AbuseIPDBAPIKeySettings> {
+  const { data } = await apiClient.get<AbuseIPDBAPIKeySettings>('/admin/proxy-dispatch/abuseipdb-api-key')
+  return data
+}
+
+export async function updateAbuseIPDBAPIKeySettings(payload: AbuseIPDBAPIKeySettingsInput): Promise<AbuseIPDBAPIKeySettings> {
+  const { data } = await apiClient.put<AbuseIPDBAPIKeySettings>('/admin/proxy-dispatch/abuseipdb-api-key', payload)
+  return data
+}
+
 export async function listProxySubscriptions(): Promise<ProxySubscriptionSource[]> {
   const { data } = await apiClient.get<ProxySubscriptionSource[]>('/admin/proxy-subscriptions')
   return data
@@ -406,6 +418,8 @@ export const proxiesAPI = {
   getAccountProxyHistory,
   getProxyDispatchSettings,
   updateProxyDispatchSettings,
+  getAbuseIPDBAPIKeySettings,
+  updateAbuseIPDBAPIKeySettings,
   listProxySubscriptions,
   createProxySubscription,
   updateProxySubscription,

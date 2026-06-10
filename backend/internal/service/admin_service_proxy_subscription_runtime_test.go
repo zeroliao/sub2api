@@ -4,12 +4,74 @@ package service
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
+
+type proxySubscriptionSettingRepoStub struct {
+	values map[string]string
+}
+
+func (r *proxySubscriptionSettingRepoStub) Get(ctx context.Context, key string) (*Setting, error) {
+	value, err := r.GetValue(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return &Setting{Key: key, Value: value}, nil
+}
+
+func (r *proxySubscriptionSettingRepoStub) GetValue(ctx context.Context, key string) (string, error) {
+	if r != nil && r.values != nil {
+		if value, ok := r.values[key]; ok {
+			return value, nil
+		}
+	}
+	return "", errors.New("setting not found")
+}
+
+func (r *proxySubscriptionSettingRepoStub) Set(ctx context.Context, key, value string) error {
+	if r.values == nil {
+		r.values = map[string]string{}
+	}
+	r.values[key] = value
+	return nil
+}
+
+func (r *proxySubscriptionSettingRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, key := range keys {
+		if value, err := r.GetValue(ctx, key); err == nil {
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
+func (r *proxySubscriptionSettingRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
+	for key, value := range settings {
+		if err := r.Set(ctx, key, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *proxySubscriptionSettingRepoStub) GetAll(ctx context.Context) (map[string]string, error) {
+	out := map[string]string{}
+	for key, value := range r.values {
+		out[key] = value
+	}
+	return out, nil
+}
+
+func (r *proxySubscriptionSettingRepoStub) Delete(ctx context.Context, key string) error {
+	delete(r.values, key)
+	return nil
+}
 
 func TestIsLocalTCPPortReachable(t *testing.T) {
 	t.Parallel()
@@ -62,4 +124,21 @@ func TestSidecarProbeHostCanOverrideProxyHost(t *testing.T) {
 
 	require.Equal(t, "sidecar-proxy", sidecarProxyHost())
 	require.Equal(t, "127.0.0.1", sidecarProbeHost())
+}
+
+func TestResolveProxySubscriptionAPIKeyUsesGlobalSetting(t *testing.T) {
+	t.Setenv("ABUSEIPDB_API_KEY", "env-key")
+	svc := &adminServiceImpl{
+		settingService: NewSettingService(&proxySubscriptionSettingRepoStub{
+			values: map[string]string{SettingKeyAbuseIPDBAPIKey: "db-key"},
+		}, nil),
+	}
+
+	got, err := svc.resolveProxySubscriptionAPIKey(context.Background(), "")
+	require.NoError(t, err)
+	require.Equal(t, "db-key", got)
+
+	got, err = svc.resolveProxySubscriptionAPIKey(context.Background(), "literal:explicit-key")
+	require.NoError(t, err)
+	require.Equal(t, "explicit-key", got)
 }

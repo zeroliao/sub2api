@@ -421,6 +421,29 @@ func (h *ProxyHandler) UpdateProxyDispatchSettings(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *ProxyHandler) GetAbuseIPDBAPIKeySettings(c *gin.Context) {
+	result, err := h.adminService.GetAbuseIPDBAPIKeySettings(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ProxyHandler) UpdateAbuseIPDBAPIKeySettings(c *gin.Context) {
+	var req service.AbuseIPDBAPIKeySettingsInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	result, err := h.adminService.UpdateAbuseIPDBAPIKeySettings(c.Request.Context(), &req)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *ProxyHandler) ListProxySubscriptions(c *gin.Context) {
 	result, err := h.adminService.ListProxySubscriptionSources(c.Request.Context())
 	if err != nil {
