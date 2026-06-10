@@ -3281,13 +3281,6 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
-	count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if count > 0 {
-		return ErrProxyInUse
-	}
 	return s.proxyRepo.Delete(ctx, id)
 }
 
@@ -3298,21 +3291,6 @@ func (s *adminServiceImpl) BatchDeleteProxies(ctx context.Context, ids []int64) 
 	}
 
 	for _, id := range ids {
-		count, err := s.proxyRepo.CountAccountsByProxyID(ctx, id)
-		if err != nil {
-			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
-				ID:     id,
-				Reason: err.Error(),
-			})
-			continue
-		}
-		if count > 0 {
-			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
-				ID:     id,
-				Reason: ErrProxyInUse.Error(),
-			})
-			continue
-		}
 		if err := s.proxyRepo.Delete(ctx, id); err != nil {
 			result.Skipped = append(result.Skipped, ProxyBatchDeleteSkipped{
 				ID:     id,

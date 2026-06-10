@@ -540,8 +540,8 @@ func TestAdminService_DeleteProxy_InUse(t *testing.T) {
 	svc := &adminServiceImpl{proxyRepo: repo}
 
 	err := svc.DeleteProxy(context.Background(), 77)
-	require.ErrorIs(t, err, ErrProxyInUse)
-	require.Empty(t, repo.deletedIDs)
+	require.NoError(t, err)
+	require.Equal(t, []int64{77}, repo.deletedIDs)
 }
 
 func TestAdminService_DeleteProxy_Error(t *testing.T) {

@@ -92,6 +92,54 @@ func (s *ProxyRepoSuite) TestDelete() {
 	s.Require().Error(err, "expected error after delete")
 }
 
+func (s *ProxyRepoSuite) TestDeleteUnbindsAccountsAndMarksBindingUnavailable() {
+	proxy := s.mustCreateProxy(&service.Proxy{
+		Name:     "to-delete-in-use",
+		Protocol: "http",
+		Host:     "127.0.0.1",
+		Port:     8080,
+		Status:   service.StatusActive,
+	})
+	s.mustInsertAccount("bound-account", &proxy.ID)
+
+	var accountID int64
+	s.Require().NoError(scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT id FROM accounts WHERE name = $1",
+		[]any{"bound-account"},
+		&accountID,
+	))
+	_, err := s.tx.ExecContext(s.ctx, `
+		INSERT INTO account_proxy_bindings (identity_key, platform, account_id, proxy_id, status, source)
+		VALUES ($1, $2, $3, $4, 'active', 'manual')
+	`, "identity-bound-account", service.PlatformAnthropic, accountID, proxy.ID)
+	s.Require().NoError(err)
+
+	err = s.repo.Delete(s.ctx, proxy.ID)
+	s.Require().NoError(err, "Delete")
+
+	var remainingAccountProxyID *int64
+	s.Require().NoError(scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT proxy_id FROM accounts WHERE id = $1",
+		[]any{accountID},
+		&remainingAccountProxyID,
+	))
+	s.Require().Nil(remainingAccountProxyID, "account proxy_id should be cleared")
+
+	var bindingStatus string
+	s.Require().NoError(scanSingleRow(
+		s.ctx,
+		s.tx,
+		"SELECT status FROM account_proxy_bindings WHERE identity_key = $1",
+		[]any{"identity-bound-account"},
+		&bindingStatus,
+	))
+	s.Require().Equal(service.ProxyBindingStatusProxyUnavailable, bindingStatus)
+}
+
 // --- List / ListWithFilters ---
 
 func (s *ProxyRepoSuite) TestList() {

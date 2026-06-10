@@ -4079,11 +4079,12 @@ export default {
       batchTestFailed: '批量测试失败',
       batchDeleteAction: '删除',
       batchDelete: '批量删除',
-      batchDeleteConfirm: '确定删除选中的 {count} 个代理吗？已被账号使用的将自动跳过。',
+      batchDeleteConfirm:
+        '确定删除选中的 {count} 个代理吗？已绑定账号的代理也会被删除，相关账号会取消代理关联，并在下次请求时重新自动分配。',
       batchDeleteDone: '已删除 {deleted} 个代理，跳过 {skipped} 个',
       batchDeleteSkipped: '已跳过 {skipped} 个代理',
       batchDeleteFailed: '批量删除失败',
-      deleteBlockedInUse: '该代理已有账号使用，无法删除',
+      deleteBlockedInUse: '该代理已有账号使用，删除后会取消相关账号的代理关联',
       accountsTitle: '使用该IP的账号',
       accountsEmpty: '暂无账号使用此代理',
       accountsFailed: '获取账号列表失败',
@@ -4115,6 +4116,8 @@ export default {
       proxyCreated: '代理添加成功',
       proxyUpdated: '代理更新成功',
       proxyDeleted: '代理删除成功',
+      proxyDeletedWithUnbind:
+        '代理删除成功，已取消 {count} 个账号的代理关联；这些账号下次请求时会重新自动分配代理。',
       proxyWorking: '代理连接正常',
       proxyWorkingWithLatency: '代理连接正常，延迟 {latency}ms',
       proxyTestFailed: '代理测试失败',
@@ -4153,7 +4156,9 @@ export default {
       nameRequired: '请输入代理名称',
       hostRequired: '请输入主机地址',
       portInvalid: '端口必须在 1-65535 之间',
-      deleteConfirm: "确定要删除代理 '{name}' 吗？使用此代理的账号将被移除代理设置。"
+      deleteConfirm: "确定要删除代理 '{name}' 吗？此操作不可撤销。",
+      deleteConfirmInUse:
+        "确定要删除代理 '{name}' 吗？当前有 {count} 个账号绑定该代理。删除后这些账号会取消代理关联，并在下次请求时重新自动分配代理。此操作不可撤销。"
     },
 
     // Redeem Codes Management

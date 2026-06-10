@@ -3945,11 +3945,12 @@ export default {
       batchTestFailed: 'Batch test failed',
       batchDeleteAction: 'Delete',
       batchDelete: 'Batch delete',
-      batchDeleteConfirm: 'Delete {count} selected proxies? In-use ones will be skipped.',
+      batchDeleteConfirm:
+        'Delete {count} selected proxies? Proxies bound to accounts will also be deleted. Those accounts will be unbound and automatically receive a new proxy on their next request.',
       batchDeleteDone: 'Deleted {deleted} proxies, skipped {skipped}',
       batchDeleteSkipped: 'Skipped {skipped} proxies',
       batchDeleteFailed: 'Batch delete failed',
-      deleteBlockedInUse: 'This proxy is in use and cannot be deleted',
+      deleteBlockedInUse: 'This proxy is in use. Deleting it will unbind related accounts.',
       accountsTitle: 'Accounts using this IP',
       accountsEmpty: 'No accounts are using this proxy',
       accountsFailed: 'Failed to load accounts list',
@@ -3994,6 +3995,8 @@ export default {
       proxyCreated: 'Proxy created successfully',
       proxyUpdated: 'Proxy updated successfully',
       proxyDeleted: 'Proxy deleted successfully',
+      proxyDeletedWithUnbind:
+        'Proxy deleted successfully. {count} account(s) were unbound and will automatically receive a new proxy on their next request.',
       proxyWorking: 'Proxy is working!',
       proxyWorkingWithLatency: 'Proxy is working! Latency: {latency}ms',
       proxyTestFailed: 'Proxy test failed',
@@ -4029,7 +4032,9 @@ export default {
       hostRequired: 'Please enter host address',
       portInvalid: 'Port must be between 1-65535',
       deleteConfirm:
-        "Are you sure you want to delete '{name}'? Accounts using this proxy will have their proxy removed."
+        "Are you sure you want to delete '{name}'? This action cannot be undone.",
+      deleteConfirmInUse:
+        "Are you sure you want to delete '{name}'? {count} account(s) are bound to this proxy. They will be unbound and automatically receive a new proxy on their next request. This action cannot be undone."
     },
 
     // Redeem Codes

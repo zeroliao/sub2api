@@ -713,7 +713,7 @@
     <ConfirmDialog
       :show="showDeleteDialog"
       :title="t('admin.proxies.deleteProxy')"
-      :message="t('admin.proxies.deleteConfirm', { name: deletingProxy?.name })"
+      :message="deleteConfirmMessage"
       :confirm-text="t('common.delete')"
       :cancel-text="t('common.cancel')"
       :danger="true"
@@ -1776,10 +1776,6 @@ const handleExportData = async () => {
 }
 
 const handleDelete = (proxy: Proxy) => {
-  if ((proxy.account_count || 0) > 0) {
-    appStore.showError(t('admin.proxies.deleteBlockedInUse'))
-    return
-  }
   deletingProxy.value = proxy
   showDeleteDialog.value = true
 }
@@ -1791,12 +1787,29 @@ const openBatchDelete = () => {
   showBatchDeleteDialog.value = true
 }
 
+const deleteConfirmMessage = computed(() => {
+  if (!deletingProxy.value) return ''
+  const count = deletingProxy.value.account_count || 0
+  if (count > 0) {
+    return t('admin.proxies.deleteConfirmInUse', {
+      name: deletingProxy.value.name,
+      count
+    })
+  }
+  return t('admin.proxies.deleteConfirm', { name: deletingProxy.value.name })
+})
+
 const confirmDelete = async () => {
   if (!deletingProxy.value) return
 
   try {
     await adminAPI.proxies.delete(deletingProxy.value.id)
-    appStore.showSuccess(t('admin.proxies.proxyDeleted'))
+    const count = deletingProxy.value.account_count || 0
+    appStore.showSuccess(
+      count > 0
+        ? t('admin.proxies.proxyDeletedWithUnbind', { count })
+        : t('admin.proxies.proxyDeleted')
+    )
     showDeleteDialog.value = false
     removeSelectedProxies([deletingProxy.value.id])
     deletingProxy.value = null

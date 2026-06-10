@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"sort"
 	"strings"
 
@@ -15,20 +16,16 @@ import (
 	entsql "entgo.io/ent/dialect/sql"
 )
 
-type sqlQuerier interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 type proxyRepository struct {
 	client *dbent.Client
-	sql    sqlQuerier
+	sql    sqlExecutor
 }
 
 func NewProxyRepository(client *dbent.Client, sqlDB *sql.DB) service.ProxyRepository {
 	return newProxyRepositoryWithSQL(client, sqlDB)
 }
 
-func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlQuerier) *proxyRepository {
+func newProxyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *proxyRepository {
 	return &proxyRepository{client: client, sql: sqlq}
 }
 
@@ -113,7 +110,39 @@ func (r *proxyRepository) Update(ctx context.Context, proxyIn *service.Proxy) er
 }
 
 func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
-	_, err := r.client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		if errors.Is(err, dbent.ErrTxStarted) {
+			return r.deleteWithExecutor(ctx, r.sql, r.client, id)
+		}
+		return err
+	}
+	if err := r.deleteWithExecutor(ctx, tx, tx.Client(), id); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *proxyRepository) deleteWithExecutor(ctx context.Context, exec sqlExecutor, client *dbent.Client, id int64) error {
+	if _, err := exec.ExecContext(ctx, `
+		UPDATE accounts
+		SET proxy_id = NULL, updated_at = NOW()
+		WHERE proxy_id = $1 AND deleted_at IS NULL
+	`, id); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `
+		UPDATE account_proxy_bindings
+		SET status = 'proxy_unavailable',
+		    last_failure_at = NOW(),
+		    last_failure_reason = 'proxy deleted',
+		    updated_at = NOW()
+		WHERE proxy_id = $1 AND status = 'active'
+	`, id); err != nil {
+		return err
+	}
+	_, err := client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
 	return err
 }
 
