@@ -261,7 +261,7 @@
                 <span>sidecar {{ source.sidecar_enabled ? 'on' : 'off' }}</span>
                 <span>纯净度 {{ source.reputation_provider || 'none' }}</span>
                 <span v-if="source.reputation_provider === 'abuseipdb'">
-                  {{ source.reputation_api_key_ref ? '自定义 Key 引用' : '使用全局 Key' }}
+                  {{ hasCustomReputationAPIKeyRef(source) ? '自定义 Key 引用' : '使用全局 Key' }}
                 </span>
                 <span v-if="isScanning(source.id)">扫描中 {{ formatScanElapsed(source.id) }}</span>
                 <span v-else>最近扫描 {{ formatDate(source.last_scan_at) }}</span>
@@ -890,9 +890,10 @@ const nodeDiffSummary = computed(() => {
 const reputationConfigStatus = computed(() => {
   const source = selectedNodeSource.value
   if (!source || source.reputation_provider === 'none') return '未启用纯净度检测'
-  if (!source.reputation_api_key_ref) return '已启用，但缺少 API Key 引用'
-  if (source.reputation_api_key_ref.startsWith('env:')) return '使用服务器环境变量'
-  if (source.reputation_api_key_ref.startsWith('keymd:')) return '使用 key.md 标签引用'
+  if (!hasCustomReputationAPIKeyRef(source)) return '使用全局 Key'
+  const apiKeyRef = source.reputation_api_key_ref || ''
+  if (apiKeyRef.startsWith('env:')) return '使用服务器环境变量'
+  if (apiKeyRef.startsWith('keymd:')) return '使用 key.md 标签引用'
   return '使用自定义引用'
 })
 
@@ -929,6 +930,14 @@ function applyNodeStrategyDraft(strategy?: ProxySubscriptionStrategy) {
   Object.assign(nodeStrategyDraft, next)
   nodePreferredCountriesText.value = next.preferred_countries.join(',')
   nodeBlockedCountriesText.value = next.blocked_countries.join(',')
+}
+
+function isDefaultAbuseIPDBAPIKeyRef(ref?: string | null) {
+  return (ref || '').trim().toLowerCase() === 'keymd:abuseipdb api key'
+}
+
+function hasCustomReputationAPIKeyRef(source: ProxySubscriptionSource) {
+  return !!source.reputation_api_key_ref && !isDefaultAbuseIPDBAPIKeyRef(source.reputation_api_key_ref)
 }
 
 function resetSubscriptionForm() {

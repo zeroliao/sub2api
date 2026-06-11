@@ -4896,6 +4896,9 @@ func resolveProxySubscriptionHostIP(ctx context.Context, host string) (string, e
 
 func (s *adminServiceImpl) resolveProxySubscriptionAPIKey(ctx context.Context, ref string) (string, error) {
 	ref = strings.TrimSpace(ref)
+	if isDefaultAbuseIPDBAPIKeyRef(ref) {
+		ref = ""
+	}
 	if ref == "" {
 		if s != nil && s.settingService != nil && s.settingService.settingRepo != nil {
 			if value, err := s.settingService.settingRepo.GetValue(ctx, SettingKeyAbuseIPDBAPIKey); err == nil {
@@ -4910,6 +4913,11 @@ func (s *adminServiceImpl) resolveProxySubscriptionAPIKey(ctx context.Context, r
 		ref = "keymd:AbuseIPDB API Key"
 	}
 	return resolveProxySubscriptionAPIKeyRef(ref)
+}
+
+func isDefaultAbuseIPDBAPIKeyRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	return strings.EqualFold(ref, "keymd:AbuseIPDB API Key")
 }
 
 func resolveProxySubscriptionAPIKeyRef(ref string) (string, error) {

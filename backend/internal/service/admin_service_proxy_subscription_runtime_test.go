@@ -142,3 +142,16 @@ func TestResolveProxySubscriptionAPIKeyUsesGlobalSetting(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "explicit-key", got)
 }
+
+func TestResolveProxySubscriptionAPIKeyDefaultKeymdRefUsesGlobalSetting(t *testing.T) {
+	t.Setenv("ABUSEIPDB_API_KEY", "env-key")
+	svc := &adminServiceImpl{
+		settingService: NewSettingService(&proxySubscriptionSettingRepoStub{
+			values: map[string]string{SettingKeyAbuseIPDBAPIKey: "db-key"},
+		}, nil),
+	}
+
+	got, err := svc.resolveProxySubscriptionAPIKey(context.Background(), "keymd:AbuseIPDB API Key")
+	require.NoError(t, err)
+	require.Equal(t, "db-key", got)
+}
