@@ -353,8 +353,8 @@ export async function updateAbuseIPDBAPIKeySettings(payload: AbuseIPDBAPIKeySett
 }
 
 export async function listProxySubscriptions(): Promise<ProxySubscriptionSource[]> {
-  const { data } = await apiClient.get<ProxySubscriptionSource[]>('/admin/proxy-subscriptions')
-  return data
+  const { data } = await apiClient.get<ProxySubscriptionSource[] | null>('/admin/proxy-subscriptions')
+  return Array.isArray(data) ? data : []
 }
 
 export async function createProxySubscription(payload: Partial<ProxySubscriptionSource>): Promise<ProxySubscriptionSource> {
@@ -388,8 +388,8 @@ export async function getProxySubscriptionScanStatus(): Promise<ProxySubscriptio
 }
 
 export async function listProxySubscriptionNodes(id: number): Promise<ProxySubscriptionNode[]> {
-  const { data } = await apiClient.get<ProxySubscriptionNode[]>(`/admin/proxy-subscriptions/${id}/nodes`)
-  return data
+  const { data } = await apiClient.get<ProxySubscriptionNode[] | null>(`/admin/proxy-subscriptions/${id}/nodes`)
+  return Array.isArray(data) ? data : []
 }
 
 export const proxiesAPI = {

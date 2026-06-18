@@ -763,6 +763,10 @@ function createSubscriptionForm() {
   }
 }
 
+function toArray<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
 const loading = ref(false)
 const importing = ref(false)
 const relationships = ref<ProxyRelationship[]>([])
@@ -1475,7 +1479,8 @@ async function confirmImport() {
 }
 
 async function loadSubscriptions() {
-  subscriptions.value = await adminAPI.proxies.listProxySubscriptions()
+  const result = await adminAPI.proxies.listProxySubscriptions()
+  subscriptions.value = toArray(result)
 }
 
 async function loadAbuseIPDBAPIKeySettings() {
@@ -1580,7 +1585,8 @@ async function scanSubscription(id: number) {
     if (selectedNodeSource.value?.id === id) {
       const refreshed = subscriptions.value.find(source => source.id === id)
       if (refreshed) selectedNodeSource.value = refreshed
-      subscriptionNodes.value = await adminAPI.proxies.listProxySubscriptionNodes(id)
+      const nodes = await adminAPI.proxies.listProxySubscriptionNodes(id)
+      subscriptionNodes.value = toArray(nodes)
     }
     appStore.showSuccess(`扫描完成，已选中 ${scanResult.value.selected} 个节点`)
   } catch (error: any) {
@@ -1614,7 +1620,8 @@ async function openSubscriptionNodes(source: ProxySubscriptionSource, pushRoute 
     selectedNodeSource.value = source
     applyNodeStrategyDraft(source.strategy)
     nodeStatusFilter.value = ''
-    subscriptionNodes.value = await adminAPI.proxies.listProxySubscriptionNodes(source.id)
+    const nodes = await adminAPI.proxies.listProxySubscriptionNodes(source.id)
+    subscriptionNodes.value = toArray(nodes)
     showNodesDialog.value = true
   } catch (error: any) {
     appStore.showError(error?.message || '加载节点失败')
