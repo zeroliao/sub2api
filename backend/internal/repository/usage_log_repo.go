@@ -17,6 +17,7 @@ import (
 	dbaccount "github.com/Wei-Shaw/sub2api/ent/account"
 	dbapikey "github.com/Wei-Shaw/sub2api/ent/apikey"
 	dbgroup "github.com/Wei-Shaw/sub2api/ent/group"
+	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	dbusersub "github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -26,6 +27,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 	gocache "github.com/patrickmn/go-cache"
+	"golang.org/x/sync/errgroup"
 )
 
 const usageLogSelectColumns = "id, user_id, api_key_id, account_id, request_id, model, requested_model, upstream_model, group_id, subscription_id, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens, image_output_tokens, image_output_cost, input_cost, output_cost, cache_creation_cost, cache_read_cost, total_cost, actual_cost, rate_multiplier, account_rate_multiplier, billing_type, request_type, stream, openai_ws_mode, duration_ms, first_token_ms, user_agent, ip_address, image_count, image_size, image_input_size, image_output_size, image_size_source, image_size_breakdown, service_tier, reasoning_effort, inbound_endpoint, upstream_endpoint, cache_ttl_overridden, channel_id, model_mapping_chain, billing_tier, billing_mode, account_stats_cost, created_at"
@@ -95,6 +97,22 @@ const rawUsageLogModelColumn = "model"
 // rawUsageLogModelColumn preserves the exact stored usage_logs.model semantics for direct filters.
 // Historical rows may contain upstream/billing model values, while newer rows store requested_model.
 // Requested/upstream/mapping analytics must use resolveModelDimensionExpression instead.
+
+// usageLogSuccessFilterUL 用于把"失败请求 usage log"（tokens=0、cost=0、不计费的占位记录）
+// 从统计性聚合中排除，避免污染 Dashboard / 用量拆分等指标。
+//
+// schema 中没有 success bool 列；新增列要做迁移，风险大；这里用 actual_cost > 0 作为代理：
+// 任何成功落账的请求都会产生 actual_cost（包括 token 计费、纯图片 token 计费、按次/按图计费），
+// 反之 failed-request usage log 的 actual_cost 为 0。
+// 早期版本用 4 项 token 和 > 0 判定会把"按次/按图计费"与"image_output_tokens 独立计费"的纯图片
+// 请求误判为失败，导致这部分请求从用量统计里消失，故改用 actual_cost。
+// 配合 `FROM usage_logs ul` JOIN 查询使用。
+const usageLogSuccessFilterUL = "ul.actual_cost > 0"
+
+// usageLogEffectivePlatformExpr 用于按"有效平台"维度聚合 usage_logs：
+// 优先取请求实际走的分组 platform，若分组未设置 platform 再 fallback 到 account.platform。
+// 配套要求查询里 LEFT JOIN groups g ON g.id = ul.group_id 与 LEFT JOIN accounts a ON a.id = ul.account_id。
+const usageLogEffectivePlatformExpr = "COALESCE(NULLIF(g.platform,''), a.platform)"
 
 // dateFormatWhitelist 将 granularity 参数映射为 PostgreSQL TO_CHAR 格式字符串，防止外部输入直接拼入 SQL
 var dateFormatWhitelist = map[string]string{
@@ -1777,6 +1795,8 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -1794,6 +1814,8 @@ func (r *usageLogRepository) GetUserStatsAggregated(ctx context.Context, userID 
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -1812,6 +1834,8 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -1829,6 +1853,8 @@ func (r *usageLogRepository) GetAPIKeyStatsAggregated(ctx context.Context, apiKe
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -1857,6 +1883,8 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -1874,6 +1902,8 @@ func (r *usageLogRepository) GetAccountStatsAggregated(ctx context.Context, acco
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -1893,6 +1923,8 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 			COALESCE(SUM(input_tokens), 0) as total_input_tokens,
 			COALESCE(SUM(output_tokens), 0) as total_output_tokens,
 			COALESCE(SUM(cache_creation_tokens + cache_read_tokens), 0) as total_cache_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as total_cache_creation_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as total_cache_read_tokens,
 			COALESCE(SUM(total_cost), 0) as total_cost,
 			COALESCE(SUM(actual_cost), 0) as total_actual_cost,
 			COALESCE(AVG(COALESCE(duration_ms, 0)), 0) as avg_duration_ms
@@ -1910,6 +1942,8 @@ func (r *usageLogRepository) GetModelStatsAggregated(ctx context.Context, modelN
 		&stats.TotalInputTokens,
 		&stats.TotalOutputTokens,
 		&stats.TotalCacheTokens,
+		&stats.TotalCacheCreationTokens,
+		&stats.TotalCacheReadTokens,
 		&stats.TotalCost,
 		&stats.TotalActualCost,
 		&stats.AverageDurationMs,
@@ -2414,6 +2448,9 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 // UserDashboardStats 用户仪表盘统计
 type UserDashboardStats = usagestats.UserDashboardStats
 
+// PlatformDashboardStats 单平台用量明细
+type PlatformDashboardStats = usagestats.PlatformDashboardStats
+
 // GetUserDashboardStats 获取用户专属的仪表盘统计
 func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID int64) (*UserDashboardStats, error) {
 	stats := &UserDashboardStats{}
@@ -2508,6 +2545,57 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	}
 	stats.Rpm = rpm
 	stats.Tpm = tpm
+
+	// 按"有效平台"维度拆分（group.platform 优先，否则 account.platform）。
+	// 与 ops 路径口径一致；HAVING 过滤掉无法确定平台的行（避免出现空字符串平台）。
+	// 与上面 totalStatsQuery/todayStatsQuery 的总值可能略微差异，原因有二：
+	//   1) 无平台归属的极少数行（group/account 都没 platform）会被 HAVING 排除；
+	//   2) usageLogSuccessFilterUL 会把 actual_cost = 0 的失败 placeholder 行排除，
+	//      而 totalStatsQuery/todayStatsQuery 没有这层过滤、会把这些行的 request 计数算进去。
+	platformQuery := `
+		SELECT
+			` + usageLogEffectivePlatformExpr + ` as platform,
+			COUNT(*) as total_requests,
+			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens), 0) as total_tokens,
+			COALESCE(SUM(ul.actual_cost), 0) as total_actual_cost,
+			COUNT(*) FILTER (WHERE ul.created_at >= $2) as today_requests,
+			COALESCE(SUM(ul.input_tokens + ul.output_tokens + ul.cache_creation_tokens + ul.cache_read_tokens) FILTER (WHERE ul.created_at >= $2), 0) as today_tokens,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $2), 0) as today_actual_cost
+		FROM usage_logs ul
+		LEFT JOIN groups g ON g.id = ul.group_id
+		LEFT JOIN accounts a ON a.id = ul.account_id
+		WHERE ul.user_id = $1
+		  AND ` + usageLogSuccessFilterUL + `
+		GROUP BY ` + usageLogEffectivePlatformExpr + `
+		HAVING ` + usageLogEffectivePlatformExpr + ` IS NOT NULL AND ` + usageLogEffectivePlatformExpr + ` <> ''
+		ORDER BY total_actual_cost DESC
+	`
+	rows, err := r.sql.QueryContext(ctx, platformQuery, userID, today)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var p PlatformDashboardStats
+		if err := rows.Scan(
+			&p.Platform,
+			&p.TotalRequests,
+			&p.TotalTokens,
+			&p.TotalActualCost,
+			&p.TodayRequests,
+			&p.TodayTokens,
+			&p.TodayActualCost,
+		); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		stats.ByPlatform = append(stats.ByPlatform, p)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 
 	return stats, nil
 }
@@ -2769,6 +2857,9 @@ type UsageStats = usagestats.UsageStats
 // BatchUserUsageStats represents usage stats for a single user
 type BatchUserUsageStats = usagestats.BatchUserUsageStats
 
+// PlatformUsage represents per-platform usage breakdown
+type PlatformUsage = usagestats.PlatformUsage
+
 func normalizePositiveInt64IDs(ids []int64) []int64 {
 	if len(ids) == 0 {
 		return nil
@@ -2809,15 +2900,21 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 		result[id] = &BatchUserUsageStats{UserID: id}
 	}
 
+	// GROUP BY (user_id, effective_platform) 一次查询同时得到总值与按平台拆分。
+	// 应用层把同一 user_id 的多行累加为总值，并把非空 platform 行收集到 ByPlatform。
 	query := `
 		SELECT
-			user_id,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
-		FROM usage_logs
-		WHERE user_id = ANY($1)
-		  AND created_at >= LEAST($2, $4)
-		GROUP BY user_id
+			ul.user_id,
+			` + usageLogEffectivePlatformExpr + ` as platform,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $2 AND ul.created_at < $3), 0) as total_cost,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $4), 0) as today_cost
+		FROM usage_logs ul
+		LEFT JOIN groups g ON g.id = ul.group_id
+		LEFT JOIN accounts a ON a.id = ul.account_id
+		WHERE ul.user_id = ANY($1)
+		  AND ul.created_at >= LEAST($2, $4)
+		  AND ` + usageLogSuccessFilterUL + `
+		GROUP BY ul.user_id, ` + usageLogEffectivePlatformExpr + `
 	`
 	today := timezone.Today()
 	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedUserIDs), startTime, endTime, today)
@@ -2826,15 +2923,25 @@ func (r *usageLogRepository) GetBatchUserUsageStats(ctx context.Context, userIDs
 	}
 	for rows.Next() {
 		var userID int64
+		var platform sql.NullString
 		var total float64
 		var todayTotal float64
-		if err := rows.Scan(&userID, &total, &todayTotal); err != nil {
+		if err := rows.Scan(&userID, &platform, &total, &todayTotal); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
-		if stats, ok := result[userID]; ok {
-			stats.TotalActualCost = total
-			stats.TodayActualCost = todayTotal
+		stats, ok := result[userID]
+		if !ok {
+			continue
+		}
+		stats.TotalActualCost += total
+		stats.TodayActualCost += todayTotal
+		if platform.Valid && platform.String != "" {
+			stats.ByPlatform = append(stats.ByPlatform, PlatformUsage{
+				Platform:        platform.String,
+				TotalActualCost: total,
+				TodayActualCost: todayTotal,
+			})
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -3448,24 +3555,6 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 
 	stats := &UsageStats{}
 	var totalAccountCost float64
-	if err := scanSingleRow(
-		ctx,
-		r.sql,
-		query,
-		args,
-		&stats.TotalRequests,
-		&stats.TotalInputTokens,
-		&stats.TotalOutputTokens,
-		&stats.TotalCacheTokens,
-		&stats.TotalCost,
-		&stats.TotalActualCost,
-		&totalAccountCost,
-		&stats.AverageDurationMs,
-	); err != nil {
-		return nil, err
-	}
-	stats.TotalAccountCost = &totalAccountCost
-	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
 
 	start := time.Unix(0, 0).UTC()
 	if filters.StartTime != nil {
@@ -3476,21 +3565,76 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		end = *filters.EndTime
 	}
 
-	endpoints, endpointErr := r.GetEndpointStatsWithFilters(ctx, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
-	if endpointErr != nil {
-		logger.LegacyPrintf("repository.usage_log", "GetEndpointStatsWithFilters failed in GetStatsWithFilters: %v", endpointErr)
-		endpoints = []EndpointStat{}
+	var endpoints, upstreamEndpoints, endpointPaths []EndpointStat
+
+	// 汇总查询:失败即致命。
+	runSummary := func(c context.Context) error {
+		return scanSingleRow(
+			c, r.sql, query, args,
+			&stats.TotalRequests,
+			&stats.TotalInputTokens,
+			&stats.TotalOutputTokens,
+			&stats.TotalCacheTokens,
+			&stats.TotalCost,
+			&stats.TotalActualCost,
+			&totalAccountCost,
+			&stats.AverageDurationMs,
+		)
 	}
-	upstreamEndpoints, upstreamEndpointErr := r.GetUpstreamEndpointStatsWithFilters(ctx, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
-	if upstreamEndpointErr != nil {
-		logger.LegacyPrintf("repository.usage_log", "GetUpstreamEndpointStatsWithFilters failed in GetStatsWithFilters: %v", upstreamEndpointErr)
-		upstreamEndpoints = []EndpointStat{}
+	// endpoint 明细:best-effort(失败 log + 返空),不致命。
+	runEndpoints := func(c context.Context) {
+		res, err := r.GetEndpointStatsWithFilters(c, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				logger.LegacyPrintf("repository.usage_log", "GetEndpointStatsWithFilters failed in GetStatsWithFilters: %v", err)
+			}
+			res = []EndpointStat{}
+		}
+		endpoints = res
 	}
-	endpointPaths, endpointPathErr := r.getEndpointPathStatsWithFilters(ctx, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
-	if endpointPathErr != nil {
-		logger.LegacyPrintf("repository.usage_log", "getEndpointPathStatsWithFilters failed in GetStatsWithFilters: %v", endpointPathErr)
-		endpointPaths = []EndpointStat{}
+	runUpstream := func(c context.Context) {
+		res, err := r.GetUpstreamEndpointStatsWithFilters(c, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				logger.LegacyPrintf("repository.usage_log", "GetUpstreamEndpointStatsWithFilters failed in GetStatsWithFilters: %v", err)
+			}
+			res = []EndpointStat{}
+		}
+		upstreamEndpoints = res
 	}
+	runPaths := func(c context.Context) {
+		res, err := r.getEndpointPathStatsWithFilters(c, start, end, filters.UserID, filters.APIKeyID, filters.AccountID, filters.GroupID, filters.Model, filters.RequestType, filters.Stream, filters.BillingType)
+		if err != nil {
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+				logger.LegacyPrintf("repository.usage_log", "getEndpointPathStatsWithFilters failed in GetStatsWithFilters: %v", err)
+			}
+			res = []EndpointStat{}
+		}
+		endpointPaths = res
+	}
+
+	if r.db != nil {
+		// 生产路径:r.sql 是 *sql.DB 连接池,可并发。4 条查询并行,延迟取最大值。
+		g, gctx := errgroup.WithContext(ctx)
+		g.Go(func() error { return runSummary(gctx) })
+		g.Go(func() error { runEndpoints(gctx); return nil })
+		g.Go(func() error { runUpstream(gctx); return nil })
+		g.Go(func() error { runPaths(gctx); return nil })
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+	} else {
+		// 事务路径(ent.Tx 不能并发查询):顺序执行,行为与重构前一致。
+		if err := runSummary(ctx); err != nil {
+			return nil, err
+		}
+		runEndpoints(ctx)
+		runUpstream(ctx)
+		runPaths(ctx)
+	}
+
+	stats.TotalAccountCost = &totalAccountCost
+	stats.TotalTokens = stats.TotalInputTokens + stats.TotalOutputTokens + stats.TotalCacheTokens
 	stats.Endpoints = endpoints
 	stats.UpstreamEndpoints = upstreamEndpoints
 	stats.EndpointPaths = endpointPaths
@@ -4032,7 +4176,8 @@ func (r *usageLogRepository) loadUsers(ctx context.Context, ids []int64) (map[in
 	if len(ids) == 0 {
 		return out, nil
 	}
-	models, err := r.client.User.Query().Where(dbuser.IDIn(ids...)).All(ctx)
+	// 无条件穿透软删除：ids 来自调用方已按 user_id 筛选的日志行；普通用户路径强制 UserID=本人（本人必为活跃用户），不会借此解析他人已删身份；仅 admin 路径可借此显示已删用户。
+	models, err := r.client.User.Query().Where(dbuser.IDIn(ids...)).All(mixins.SkipSoftDelete(ctx))
 	if err != nil {
 		return nil, err
 	}

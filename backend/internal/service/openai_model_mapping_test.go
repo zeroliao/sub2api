@@ -289,3 +289,17 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 		})
 	}
 }
+
+func TestUsageBillingModelCandidatesMapsCodexAutoReviewModel(t *testing.T) {
+	candidates := usageBillingModelCandidates("codex-auto-review")
+
+	expected := []string{"codex-auto-review", "gpt-5.5"}
+	if len(candidates) != len(expected) {
+		t.Fatalf("usageBillingModelCandidates(codex-auto-review) = %#v, want %#v", candidates, expected)
+	}
+	for i := range expected {
+		if candidates[i] != expected[i] {
+			t.Fatalf("usageBillingModelCandidates(codex-auto-review) = %#v, want %#v", candidates, expected)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -41,6 +42,10 @@ type CreateProxyRequest struct {
 	MaxBoundAccounts  *int   `json:"max_bound_accounts"`
 	MaxActiveAccounts *int   `json:"max_active_accounts"`
 	Weight            int    `json:"weight"`
+	ExpiresAt         *int64 `json:"expires_at"`
+	FallbackMode      string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID     *int64 `json:"backup_proxy_id"`
+	ExpiryWarnDays    int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // UpdateProxyRequest represents update proxy request
@@ -61,6 +66,10 @@ type UpdateProxyRequest struct {
 	MaxBoundAccounts  *int   `json:"max_bound_accounts"`
 	MaxActiveAccounts *int   `json:"max_active_accounts"`
 	Weight            *int   `json:"weight"`
+	ExpiresAt         *int64 `json:"expires_at"`
+	FallbackMode      string `json:"fallback_mode" binding:"omitempty,oneof=none proxy direct"`
+	BackupProxyID     *int64 `json:"backup_proxy_id"`
+	ExpiryWarnDays    int    `json:"expiry_warn_days" binding:"omitempty,min=0"`
 }
 
 // List handles listing all proxies with pagination
@@ -152,6 +161,11 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 	}
 
 	executeAdminIdempotentJSON(c, "admin.proxies.create", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		var expiresAt *time.Time
+		if req.ExpiresAt != nil && *req.ExpiresAt > 0 {
+			t := time.Unix(*req.ExpiresAt, 0).UTC()
+			expiresAt = &t
+		}
 		proxy, err := h.adminService.CreateProxy(ctx, &service.CreateProxyInput{
 			Name:              strings.TrimSpace(req.Name),
 			Protocol:          strings.TrimSpace(req.Protocol),
@@ -168,6 +182,10 @@ func (h *ProxyHandler) Create(c *gin.Context) {
 			MaxBoundAccounts:  req.MaxBoundAccounts,
 			MaxActiveAccounts: req.MaxActiveAccounts,
 			Weight:            req.Weight,
+			ExpiresAt:         expiresAt,
+			FallbackMode:      strings.TrimSpace(req.FallbackMode),
+			BackupProxyID:     req.BackupProxyID,
+			ExpiryWarnDays:    req.ExpiryWarnDays,
 		})
 		if err != nil {
 			return nil, err
@@ -191,6 +209,11 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		return
 	}
 
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt > 0 {
+		t := time.Unix(*req.ExpiresAt, 0).UTC()
+		expiresAt = &t
+	}
 	proxy, err := h.adminService.UpdateProxy(c.Request.Context(), proxyID, &service.UpdateProxyInput{
 		Name:              strings.TrimSpace(req.Name),
 		Protocol:          strings.TrimSpace(req.Protocol),
@@ -208,6 +231,10 @@ func (h *ProxyHandler) Update(c *gin.Context) {
 		MaxBoundAccounts:  req.MaxBoundAccounts,
 		MaxActiveAccounts: req.MaxActiveAccounts,
 		Weight:            req.Weight,
+		ExpiresAt:         expiresAt,
+		FallbackMode:      strings.TrimSpace(req.FallbackMode),
+		BackupProxyID:     req.BackupProxyID,
+		ExpiryWarnDays:    req.ExpiryWarnDays,
 	})
 	if err != nil {
 		response.ErrorFrom(c, err)

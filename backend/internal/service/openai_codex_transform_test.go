@@ -847,6 +847,7 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 		"gpt5.4-mini":               "gpt-5.4-mini",
 		"gpt5.4mini":                "gpt-5.4-mini",
 		"gpt 5.4 mini":              "gpt-5.4-mini",
+		"codex-auto-review":         "gpt-5.5",
 		"gpt-5.3":                   "gpt-5.3-codex",
 		"gpt5.3":                    "gpt-5.3-codex",
 		"gpt-5.3-codex":             "gpt-5.3-codex",
