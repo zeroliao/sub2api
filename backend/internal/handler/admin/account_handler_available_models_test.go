@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,9 +32,8 @@ func (s *availableModelsAdminService) GetAccount(_ context.Context, id int64) (*
 func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	router.GET("/api/v1/admin/accounts/:id/models", handler.GetAvailableModels)
-	router.POST("/api/v1/admin/accounts/models/preview-api-key", handler.PreviewAPIKeyModels)
 	return router
 }
 
@@ -63,15 +61,85 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 		nil,
 		nil,
 		nil,
+		nil,
 		upstream,
 		&config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
 		nil,
-		nil,
-		nil,
 	)
-	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
+	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/accounts/:id/models/sync-upstream", handler.SyncUpstreamModels)
 	return router
+}
+
+func TestAccountHandlerGetAvailableModels_GrokUsesXAIModels(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       44,
+			Name:     "grok-oauth",
+			Platform: service.PlatformGrok,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"grok-4.3": "grok-4.3",
+				},
+			},
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/44/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data, 1)
+	require.Equal(t, "grok-4.3", resp.Data[0].ID)
+}
+
+func TestAccountHandlerGetAvailableModels_GrokDefaultsToXAIModelsWithoutMapping(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       45,
+			Name:     "grok-oauth-defaults",
+			Platform: service.PlatformGrok,
+			Type:     service.AccountTypeOAuth,
+			Status:   service.StatusActive,
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/45/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp.Data)
+
+	var ids []string
+	for _, model := range resp.Data {
+		id := model.ID
+		ids = append(ids, id)
+		require.NotContains(t, strings.ToLower(id), "claude")
+	}
+	require.Contains(t, ids, "grok-4.3")
+	require.Contains(t, ids, "grok-build-0.1")
 }
 
 func TestAccountHandlerGetAvailableModels_OpenAIOAuthUsesExplicitModelMapping(t *testing.T) {
@@ -145,92 +213,46 @@ func TestAccountHandlerGetAvailableModels_OpenAIOAuthPassthroughFallsBackToDefau
 	require.NotEqual(t, "gpt-5", resp.Data[0].ID)
 }
 
-func TestAccountHandlerPreviewAPIKeyModels_OpenAI(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/models", r.URL.Path)
-		require.Equal(t, "Bearer sk-test", r.Header.Get("Authorization"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-5.5","object":"model"},{"id":"gpt-5.4","object":"model"},{"id":"gpt-5.5","object":"model"}]}`))
-	}))
-	defer upstream.Close()
+func TestAccountHandlerGetAvailableModels_OpenAISparkShadowReturnsMappingModels(t *testing.T) {
+	parentID := int64(100)
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:              44,
+			Name:            "openai-spark-shadow",
+			Platform:        service.PlatformOpenAI,
+			Type:            service.AccountTypeOAuth,
+			Status:          service.StatusActive,
+			ParentAccountID: &parentID,
+			QuotaDimension:  service.QuotaDimensionSpark,
+			Credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.3-codex-spark": "gpt-5.3-codex-spark",
+				},
+			},
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
 
-	router := setupAvailableModelsRouter(newStubAdminService())
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/preview-api-key", strings.NewReader(fmt.Sprintf(`{
-		"platform":"openai",
-		"api_key":"sk-test",
-		"base_url":%q
-	}`, upstream.URL)))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/44/models", nil)
 	router.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
+
 	var resp struct {
 		Data []struct {
 			ID string `json:"id"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, []string{"gpt-5.5", "gpt-5.4"}, []string{resp.Data[0].ID, resp.Data[1].ID})
-}
-
-func TestAccountHandlerPreviewAPIKeyModels_Anthropic(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1/models", r.URL.Path)
-		require.Equal(t, "sk-ant-test", r.Header.Get("X-Api-Key"))
-		require.Equal(t, "2023-06-01", r.Header.Get("Anthropic-Version"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"claude-sonnet-4-5-20250929","type":"model","display_name":"Claude Sonnet 4.5"},{"id":"claude-haiku-4-5-20251001","type":"model"}]}`))
-	}))
-	defer upstream.Close()
-
-	router := setupAvailableModelsRouter(newStubAdminService())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/preview-api-key", strings.NewReader(fmt.Sprintf(`{
-		"platform":"anthropic",
-		"api_key":"sk-ant-test",
-		"base_url":%q
-	}`, upstream.URL)))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	ids := make([]string, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		ids = append(ids, m.ID)
 	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, []string{"claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"}, []string{resp.Data[0].ID, resp.Data[1].ID})
-}
-
-func TestAccountHandlerPreviewAPIKeyModels_Gemini(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.Equal(t, "/v1beta/models", r.URL.Path)
-		require.Equal(t, "gemini-key", r.Header.Get("X-Goog-Api-Key"))
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-2.5-pro","displayName":"Gemini 2.5 Pro"},{"name":"models/gemini-2.5-flash"}]}`))
-	}))
-	defer upstream.Close()
-
-	router := setupAvailableModelsRouter(newStubAdminService())
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/preview-api-key", strings.NewReader(fmt.Sprintf(`{
-		"platform":"gemini",
-		"api_key":"gemini-key",
-		"base_url":%q
-	}`, upstream.URL)))
-	req.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(rec, req)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	var resp struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Equal(t, []string{"gemini-2.5-pro", "gemini-2.5-flash"}, []string{resp.Data[0].ID, resp.Data[1].ID})
+	require.ElementsMatch(t, []string{
+		"gpt-5.3-codex-spark",
+	}, ids, "影子可用模型由 model_mapping 派生（非写死）")
 }
 
 func TestAccountHandlerSyncUpstreamModels_ConfigErrorReturnsBadRequest(t *testing.T) {

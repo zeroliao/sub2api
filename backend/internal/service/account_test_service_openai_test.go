@@ -24,9 +24,7 @@ import (
 
 type queuedHTTPUpstream struct {
 	responses []*http.Response
-	errors    []error
 	requests  []*http.Request
-	proxyURLs []string
 	tlsFlags  []bool
 }
 
@@ -34,105 +32,15 @@ func (u *queuedHTTPUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*htt
 	return nil, fmt.Errorf("unexpected Do call")
 }
 
-func (u *queuedHTTPUpstream) DoWithTLS(req *http.Request, proxyURL string, _ int64, _ int, profile *tlsfingerprint.Profile) (*http.Response, error) {
+func (u *queuedHTTPUpstream) DoWithTLS(req *http.Request, _ string, _ int64, _ int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	u.requests = append(u.requests, req)
-	u.proxyURLs = append(u.proxyURLs, proxyURL)
 	u.tlsFlags = append(u.tlsFlags, profile != nil)
-	if len(u.errors) > 0 {
-		err := u.errors[0]
-		u.errors = u.errors[1:]
-		if err != nil {
-			return nil, err
-		}
-	}
 	if len(u.responses) == 0 {
 		return nil, fmt.Errorf("no mocked response")
 	}
 	resp := u.responses[0]
 	u.responses = u.responses[1:]
 	return resp, nil
-}
-
-type openAIProxyHealthReporterStub struct {
-	rel          *ProxyRelationship
-	failures     []string
-	successes    []int64
-	failureError error
-}
-
-func (s *openAIProxyHealthReporterStub) ReportAccountProxyFailure(_ context.Context, accountID int64, reason string) (*ProxyRelationship, error) {
-	s.failures = append(s.failures, fmt.Sprintf("%d:%s", accountID, reason))
-	if s.failureError != nil {
-		return nil, s.failureError
-	}
-	return s.rel, nil
-}
-
-func (s *openAIProxyHealthReporterStub) RecordAccountProxySuccess(_ context.Context, accountID int64) error {
-	s.successes = append(s.successes, accountID)
-	return nil
-}
-
-type openAISettingRepoStub struct {
-	values map[string]string
-}
-
-func (s *openAISettingRepoStub) Get(_ context.Context, key string) (*Setting, error) {
-	if s.values != nil {
-		if value, ok := s.values[key]; ok {
-			return &Setting{Key: key, Value: value}, nil
-		}
-	}
-	return nil, ErrSettingNotFound
-}
-
-func (s *openAISettingRepoStub) GetValue(_ context.Context, key string) (string, error) {
-	if s.values != nil {
-		if value, ok := s.values[key]; ok {
-			return value, nil
-		}
-	}
-	return "", ErrSettingNotFound
-}
-
-func (s *openAISettingRepoStub) Set(_ context.Context, key, value string) error {
-	if s.values == nil {
-		s.values = make(map[string]string)
-	}
-	s.values[key] = value
-	return nil
-}
-
-func (s *openAISettingRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	out := make(map[string]string, len(keys))
-	for _, key := range keys {
-		if value, err := s.GetValue(ctx, key); err == nil {
-			out[key] = value
-		}
-	}
-	return out, nil
-}
-
-func (s *openAISettingRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {
-	for key, value := range settings {
-		if err := s.Set(ctx, key, value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *openAISettingRepoStub) GetAll(_ context.Context) (map[string]string, error) {
-	out := make(map[string]string, len(s.values))
-	for key, value := range s.values {
-		out[key] = value
-	}
-	return out, nil
-}
-
-func (s *openAISettingRepoStub) Delete(_ context.Context, key string) error {
-	delete(s.values, key)
-	return nil
 }
 
 func newJSONResponse(status int, body string) *http.Response {
@@ -221,7 +129,6 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.NoError(t, err)
-	require.Equal(t, []bool{true}, upstream.tlsFlags)
 	require.Len(t, upstream.requests, 1)
 	require.Equal(t, HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileFromContext(upstream.requests[0].Context()))
 	require.NotEmpty(t, repo.updatedExtra)
@@ -230,7 +137,35 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Contains(t, recorder.Body.String(), "test_complete")
 }
 
-func TestAccountTestService_OpenAIProxyFailureRetriesReassignedProxy(t *testing.T) {
+func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := newTestContext()
+
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
+
+`))
+
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{httpUpstream: upstream}
+	account := &Account{
+		ID:          90,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "test-token"},
+	}
+
+	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.6", "", "")
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+
+	body, err := io.ReadAll(upstream.requests[0].Body)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.6-sol", gjson.GetBytes(body, "model").String())
+}
+
+func TestAccountTestService_OpenAIShadowUsesParentCredentialsAndShadowModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, recorder := newTestContext()
 
@@ -239,145 +174,53 @@ func TestAccountTestService_OpenAIProxyFailureRetriesReassignedProxy(t *testing.
 
 `))
 
-	oldProxyID := int64(1)
-	newProxy := &Proxy{ID: 2, Protocol: "http", Host: "proxy-2.local", Port: 8080}
-	reporter := &openAIProxyHealthReporterStub{
-		rel: &ProxyRelationship{CurrentProxy: newProxy},
+	parentID := int64(100)
+	parent := &Account{
+		ID:       parentID,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Status:   StatusActive,
+		Credentials: map[string]any{
+			"access_token":       "parent-token",
+			"chatgpt_account_id": "org-parent",
+		},
 	}
-	upstream := &queuedHTTPUpstream{
-		errors:    []error{fmt.Errorf("TLS handshake failed: tls: first record does not look like a TLS handshake"), nil},
-		responses: []*http.Response{resp},
-	}
-	svc := &AccountTestService{httpUpstream: upstream, proxyHealthReporter: reporter}
-	account := &Account{
-		ID:          91,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		ProxyID:     &oldProxyID,
-		Proxy:       &Proxy{ID: oldProxyID, Protocol: "http", Host: "proxy-1.local", Port: 8080},
-		Credentials: map[string]any{"access_token": "test-token"},
+	shadow := &Account{
+		ID:              200,
+		Platform:        PlatformOpenAI,
+		Type:            AccountTypeOAuth,
+		Status:          StatusActive,
+		ParentAccountID: &parentID,
+		QuotaDimension:  QuotaDimensionSpark,
+		Concurrency:     2,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"gpt-5.3-codex-spark": "gpt-5.3-codex-spark",
+			},
+		},
 	}
 
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	repo := &openAIAccountTestRepo{
+		mockAccountRepoForGemini: mockAccountRepoForGemini{
+			accountsByID: map[int64]*Account{
+				parentID: parent,
+				200:      shadow,
+			},
+		},
+	}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
+	svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+
+	err := svc.TestAccountConnection(ctx, shadow.ID, "gpt-5.3-codex-spark", "", "")
 	require.NoError(t, err)
-	require.Equal(t, []string{"http://proxy-1.local:8080", "http://proxy-2.local:8080"}, upstream.proxyURLs)
-	require.Len(t, reporter.failures, 1)
-	require.Equal(t, []int64{account.ID}, reporter.successes)
-	require.Contains(t, recorder.Body.String(), "test_complete")
-}
-
-func TestAccountTestService_OpenAIProxyFailureRetriesDirectWhenNoReplacement(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, recorder := newTestContext()
-
-	resp := newJSONResponse(http.StatusOK, "")
-	resp.Body = io.NopCloser(strings.NewReader(`data: {"type":"response.completed"}
-
-`))
-
-	proxyID := int64(1)
-	reporter := &openAIProxyHealthReporterStub{
-		rel: &ProxyRelationship{NoAvailableProxy: true, DirectFallbackMode: DirectFallbackGlobal},
-	}
-	upstream := &queuedHTTPUpstream{
-		errors:    []error{fmt.Errorf("proxy CONNECT failed: 503 Service Unavailable"), nil},
-		responses: []*http.Response{resp},
-	}
-	svc := &AccountTestService{httpUpstream: upstream, proxyHealthReporter: reporter}
-	account := &Account{
-		ID:          92,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		ProxyID:     &proxyID,
-		Proxy:       &Proxy{ID: proxyID, Protocol: "http", Host: "proxy-1.local", Port: 8080},
-		Credentials: map[string]any{"access_token": "test-token"},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+	require.Len(t, upstream.requests, 1)
+	req := upstream.requests[0]
+	require.Equal(t, "Bearer parent-token", req.Header.Get("Authorization"))
+	require.Equal(t, "org-parent", req.Header.Get("chatgpt-account-id"))
+	body, err := io.ReadAll(req.Body)
 	require.NoError(t, err)
-	require.Equal(t, []string{"http://proxy-1.local:8080", ""}, upstream.proxyURLs)
-	require.Len(t, reporter.failures, 1)
-	require.Empty(t, reporter.successes)
-	require.Contains(t, recorder.Body.String(), "test_complete")
-}
-
-func TestAccountTestService_OpenAIProxyFailureDoesNotRetryDirectWhenFallbackOff(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, recorder := newTestContext()
-
-	proxyID := int64(1)
-	reporter := &openAIProxyHealthReporterStub{rel: &ProxyRelationship{NoAvailableProxy: true}}
-	upstream := &queuedHTTPUpstream{
-		errors: []error{fmt.Errorf("TLS handshake failed: tls: first record does not look like a TLS handshake")},
-	}
-	settings := &SettingService{settingRepo: &openAISettingRepoStub{values: map[string]string{
-		SettingKeyProxyDispatchSettings: `{"direct_fallback_mode":"off","auto_assign_enabled":true}`,
-	}}}
-	svc := &AccountTestService{httpUpstream: upstream, settingService: settings, proxyHealthReporter: reporter}
-	account := &Account{
-		ID:          93,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		ProxyID:     &proxyID,
-		Proxy:       &Proxy{ID: proxyID, Protocol: "http", Host: "proxy-1.local", Port: 8080},
-		Credentials: map[string]any{"access_token": "test-token"},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
-	require.Error(t, err)
-	require.Equal(t, []string{"http://proxy-1.local:8080"}, upstream.proxyURLs)
-	require.Len(t, reporter.failures, 1)
-	require.Contains(t, recorder.Body.String(), "first record does not look like a TLS handshake")
-}
-
-func TestAccountTestService_OpenAINonProxyErrorDoesNotReportOrRetry(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	ctx, recorder := newTestContext()
-
-	proxyID := int64(1)
-	reporter := &openAIProxyHealthReporterStub{}
-	upstream := &queuedHTTPUpstream{
-		errors: []error{fmt.Errorf("oauth token expired")},
-	}
-	svc := &AccountTestService{httpUpstream: upstream, proxyHealthReporter: reporter}
-	account := &Account{
-		ID:          94,
-		Platform:    PlatformOpenAI,
-		Type:        AccountTypeOAuth,
-		Concurrency: 1,
-		ProxyID:     &proxyID,
-		Proxy:       &Proxy{ID: proxyID, Protocol: "http", Host: "proxy-1.local", Port: 8080},
-		Credentials: map[string]any{"access_token": "test-token"},
-	}
-
-	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
-	require.Error(t, err)
-	require.Equal(t, []string{"http://proxy-1.local:8080"}, upstream.proxyURLs)
-	require.Empty(t, reporter.failures)
-	require.Contains(t, recorder.Body.String(), "oauth token expired")
-}
-
-func TestAccountTestService_OpenAIProxyErrorWithoutReplayableBodyDoesNotRetry(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, chatgptCodexAPIURL, io.NopCloser(strings.NewReader(`{"input":"hi"}`)))
-	req.GetBody = nil
-	proxyID := int64(1)
-	reporter := &openAIProxyHealthReporterStub{
-		rel: &ProxyRelationship{CurrentProxy: &Proxy{ID: 2, Protocol: "http", Host: "proxy-2.local", Port: 8080}},
-	}
-	upstream := &queuedHTTPUpstream{
-		errors: []error{fmt.Errorf("proxy CONNECT failed: 503 Service Unavailable")},
-	}
-	svc := &AccountTestService{httpUpstream: upstream, proxyHealthReporter: reporter}
-	account := &Account{ID: 95, ProxyID: &proxyID, Proxy: &Proxy{ID: proxyID, Protocol: "http", Host: "proxy-1.local", Port: 8080}, Concurrency: 1}
-
-	resp, err := svc.doOpenAIAccountTestWithProxyFallback(req, account.Proxy.URL(), account, &tlsfingerprint.Profile{Name: "test"})
-	require.Nil(t, resp)
-	require.Error(t, err)
-	require.Equal(t, []string{"http://proxy-1.local:8080"}, upstream.proxyURLs)
-	require.Len(t, reporter.failures, 1)
+	require.Equal(t, "gpt-5.3-codex-spark", gjson.GetBytes(body, "model").String())
+	require.Contains(t, recorder.Body.String(), `"success":true`)
 }
 
 func TestAccountTestService_OpenAIStreamEOFBeforeCompletedFails(t *testing.T) {

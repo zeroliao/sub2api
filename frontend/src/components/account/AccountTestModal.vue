@@ -249,7 +249,8 @@ import Select from '@/components/common/Select.vue'
 import TextArea from '@/components/common/TextArea.vue'
 import { Icon } from '@/components/icons'
 import { useClipboard } from '@/composables/useClipboard'
-import { getModelsByPlatform } from '@/composables/useModelWhitelist'
+import { buildApiUrl } from '@/api/client'
+import { adminAPI } from '@/api/admin'
 import type { Account, ClaudeModel } from '@/types'
 
 const { t } = useI18n()
@@ -263,13 +264,6 @@ interface OutputLine {
 interface PreviewImage {
   url: string
   mimeType?: string
-}
-
-interface TestModelOption {
-  id: string
-  type: string
-  display_name: string
-  created_at: string
 }
 
 const props = defineProps<{
@@ -286,7 +280,7 @@ const status = ref<'idle' | 'connecting' | 'success' | 'error'>('idle')
 const outputLines = ref<OutputLine[]>([])
 const streamingContent = ref('')
 const errorMessage = ref('')
-const availableModels = ref<TestModelOption[]>([])
+const availableModels = ref<ClaudeModel[]>([])
 const selectedModelId = ref('')
 const testPrompt = ref('')
 const loadingModels = ref(false)
@@ -315,14 +309,7 @@ const supportsOpenAIImageTest = computed(() => {
 
 const supportsImageTest = computed(() => supportsGeminiImageTest.value || supportsOpenAIImageTest.value)
 
-const toTestModelOption = (model: string): TestModelOption => ({
-  id: model,
-  type: 'model',
-  display_name: model,
-  created_at: ''
-})
-
-const sortTestModels = (models: TestModelOption[]) => {
+const sortTestModels = (models: ClaudeModel[]) => {
   const priorityMap = new Map(prioritizedGeminiModels.map((id, index) => [id, index]))
 
   return [...models].sort((a, b) => {
@@ -379,7 +366,7 @@ const loadAvailableModels = async () => {
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = getModelsByPlatform(props.account.platform).map(toTestModelOption)
+    const models = await adminAPI.accounts.getAvailableModels(props.account.id)
     availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
@@ -444,8 +431,8 @@ const startTest = async () => {
   abortController = new AbortController()
 
   try {
-    // Create EventSource for SSE
-    const url = `/api/v1/admin/accounts/${props.account.id}/test`
+    // Use the configured API base; EventSource does not support POST.
+    const url = buildApiUrl(`/admin/accounts/${props.account.id}/test`)
 
     // Use fetch with streaming for SSE since EventSource doesn't support POST
     const response = await fetch(url, {
