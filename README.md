@@ -4,7 +4,9 @@
 
 <div align="center">
 
-[![Go](https://img.shields.io/badge/Go-1.26.4-00ADD8.svg)](https://golang.org/)
+<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
+
+[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -79,8 +81,8 @@ Please read the following carefully before using this project:
 </tr>
 
 <tr>
-<td width="180"><a href="https://api.pptoken.org/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
-<td>Thanks to PPToken.org for sponsoring this project! <a href="https://api.pptoken.org/register?promo=SUB2API">PPToken.org</a> specializes in GPT model API relay services, supporting Codex, Claude Code, OpenAI-compatible clients, and Gemini CLI integration. Top-ups are 1:1 (¥1 = $1 credit); GPT models start at 0.16x rate multiplier, with overall cost at roughly 2.2% of official pricing and first-token latency around 1 second — ideal for developers seeking low-cost, high-speed access to GPT model capabilities. Technical support: 24/7 real human responses (no bots), @tech in the group chat and get a reply within 10 minutes. Sponsor benefit: the first 200 users who register via the <a href="https://api.pptoken.org/register?promo=SUB2API">exclusive registration link</a> and enter promo code `SUB2API` can claim free Codex / Claude Code trial credits — no minimum spend, no card required.
+<td width="180"><a href="https://api.pptoken.cc/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
+<td>Thanks to PPToken.cc for sponsoring this project! <a href="https://api.pptoken.cc/register?promo=SUB2API">PPToken.cc</a> specializes in GPT model API relay services, supporting Codex, Claude Code, OpenAI-compatible clients, and Gemini CLI integration. Top-ups are 1:1 (¥1 = $1 credit); GPT models start at 0.16x rate multiplier, with overall cost at roughly 2.2% of official pricing and first-token latency around 1 second — ideal for developers seeking low-cost, high-speed access to GPT model capabilities. Technical support: 24/7 real human responses (no bots), @tech in the group chat and get a reply within 10 minutes. Sponsor benefit: the first 200 users who register via the <a href="https://api.pptoken.cc/register?promo=SUB2API">exclusive registration link</a> and enter promo code `SUB2API` can claim free Codex / Claude Code trial credits — no minimum spend, no card required.
 </td>
 </tr>
 
@@ -183,6 +185,11 @@ Model authenticity: no content intervention or secondary filtering — experienc
 </td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://nagora.ai/"><img src="assets/partners/logos/nagora.png" alt="Nagora" width="150"></a></td>
+<td><a href="https://nagora.ai/">Nagora</a> is a multi-model AI API gateway built for developers and teams. With a single account and API key, you can access more than 26 leading text and image models through one unified interface. It is compatible with OpenAI, Anthropic, and Gemini protocols and integrates seamlessly with development tools such as Claude Code, Codex, and Gemini CLI.<br><br>The platform provides intelligent routing, automatic failover, transparent pricing, and consolidated billing, along with budget management, rate limiting, and concurrency controls. This makes AI usage more reliable and manageable across individual development, team collaboration, and production environments.<br><br>No changes to your existing application are required. Simply replace the Base URL and API key to complete the integration in as little as one minute.</td>
+</tr>
+
 </table>
 
 ## Overview
@@ -205,19 +212,19 @@ Sub2API is an AI API gateway platform designed to distribute and manage API quot
 
 Community projects that extend or integrate with Sub2API:
 
-| Project | Description | Features |
-|---------|-------------|----------|
-| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~Self-service payment system~~ | **Now Built-in** — Payment is now integrated into Sub2API, no separate deployment needed. See [Payment Configuration Guide](docs/PAYMENT.md) |
-| [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | Mobile admin console | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
+| Project                                                    | Description                     | Features                                                                                                                                                        |
+| ---------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~Self-service payment system~~ | **Now Built-in** — Payment is now integrated into Sub2API, no separate deployment needed. See [Payment Configuration Guide](docs/PAYMENT.md)                    |
+| [sub2api-mobile](https://github.com/ckken/sub2api-mobile)  | Mobile admin console            | Cross-platform app (iOS/Android/Web) for user management, account management, monitoring dashboard, and multi-backend switching; built with Expo + React Native |
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|------------|
-| Backend | Go 1.26.4, Gin, Ent |
-| Frontend | Vue 3.4+, Vite 5+, TailwindCSS |
-| Database | PostgreSQL 15+ |
-| Cache/Queue | Redis 7+ |
+| Component   | Technology                     |
+| ----------- | ------------------------------ |
+| Backend     | Go 1.26.4, Gin, Ent            |
+| Frontend    | Vue 3.4+, Vite 5+, TailwindCSS |
+| Database    | PostgreSQL 15+                 |
+| Cache/Queue | Redis 7+                       |
 
 ---
 
@@ -253,6 +260,7 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 ```
 
 The script will:
+
 1. Detect your system architecture
 2. Download the latest release
 3. Install binary to `/opt/sub2api`
@@ -273,6 +281,7 @@ sudo systemctl enable sub2api
 ```
 
 The Setup Wizard will guide you through:
+
 - Database configuration
 - Redis configuration
 - Admin account creation
@@ -282,6 +291,7 @@ The Setup Wizard will guide you through:
 You can upgrade directly from the **Admin Dashboard** by clicking the **Check for Updates** button in the top-left corner.
 
 The web interface will:
+
 - Check for new versions automatically
 - Download and apply updates with one click
 - Support rollback if needed
@@ -332,6 +342,7 @@ docker compose logs -f sub2api
 ```
 
 **What the script does:**
+
 - Downloads `docker-compose.local.yml` (saved as `docker-compose.yml`) and `.env.example`
 - Generates secure credentials (JWT_SECRET, TOTP_ENCRYPTION_KEY, POSTGRES_PASSWORD)
 - Creates `.env` file with auto-generated secrets
@@ -376,6 +387,7 @@ SERVER_PORT=8080
 ```
 
 **Generate secure secrets:**
+
 ```bash
 # Generate JWT_SECRET
 openssl rand -hex 32
@@ -407,10 +419,10 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 #### Deployment Versions
 
-| Version | Data Storage | Migration | Best For |
-|---------|-------------|-----------|----------|
+| Version                      | Data Storage      | Migration                      | Best For                     |
+| ---------------------------- | ----------------- | ------------------------------ | ---------------------------- |
 | **docker-compose.local.yml** | Local directories | ✅ Easy (tar entire directory) | Production, frequent backups |
-| **docker-compose.yml** | Named volumes | ⚠️ Requires docker commands | Simple setup |
+| **docker-compose.yml**       | Named volumes     | ⚠️ Requires docker commands    | Simple setup                 |
 
 **Recommendation:** Use `docker-compose.local.yml` (deployed by script) for easier data management.
 
@@ -419,6 +431,7 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 Open `http://YOUR_SERVER_IP:8080` in your browser.
 
 If admin password was auto-generated, find it in logs:
+
 ```bash
 docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 ```
@@ -544,6 +557,7 @@ database:
 redis:
   host: "localhost"
   port: 6379
+  username: ""
   password: ""
 
 jwt:
@@ -573,8 +587,17 @@ Additional security-related options are available in `config.yaml`:
 - `security.response_headers.enabled` to enable configurable response header filtering (disabled uses default allowlist)
 - `security.csp` to control Content-Security-Policy headers
 - `billing.circuit_breaker` to fail closed on billing errors
-- `server.trusted_proxies` to enable X-Forwarded-For parsing
+- `security.trust_forwarded_ip_for_api_key_acl` enables legacy raw forwarded-header takeover (enabled by default for upgrade compatibility); disable it to enforce `server.trusted_proxies`, which should contain only the exact proxy CIDRs that connect directly to Sub2API
+- `security.forwarded_client_ip_headers` configures up to 16 third-party CDN client-IP header names; they are checked in order before the built-in headers only while legacy takeover is enabled
 - `turnstile.required` to require Turnstile in release mode
+
+Custom client-IP headers can be set in YAML or as a comma-separated environment variable:
+
+```bash
+SECURITY_FORWARDED_CLIENT_IP_HEADERS=True-Client-IP,X-CDN-Client-IP
+```
+
+Header names are validated, canonicalized, and de-duplicated. The admin security settings can update the list without a restart; new installations persist YAML/environment defaults and existing installations backfill a missing database value. When legacy takeover is disabled, all custom and built-in raw forwarding headers are ignored and Gin uses only `server.trusted_proxies`. While takeover is enabled, firewall the origin to CDN/proxy addresses and make the edge overwrite every trusted client-IP header. See [`deploy/EDGE_SECURITY.md`](deploy/EDGE_SECURITY.md) for the complete migration and trust-boundary rules.
 
 **⚠️ Security Warning: HTTP URL Configuration**
 
@@ -583,8 +606,8 @@ When `security.url_allowlist.enabled=false`, the system performs minimal URL val
 ```yaml
 security:
   url_allowlist:
-    enabled: false                # Disable allowlist checks
-    allow_insecure_http: false    # HTTPS only (recommended for production)
+    enabled: false # Disable allowlist checks
+    allow_insecure_http: false # HTTPS only (recommended for production)
 ```
 
 **Or via environment variable:**
@@ -595,22 +618,26 @@ SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP=false
 ```
 
 **Risks of allowing HTTP:**
+
 - API keys and data transmitted in **plaintext** (vulnerable to interception)
 - Susceptible to **man-in-the-middle (MITM) attacks**
 - **NOT suitable for production** environments
 
 **When to use HTTP:**
+
 - ✅ Development/testing with local servers (http://localhost)
 - ✅ Internal networks with trusted endpoints
 - ✅ Testing account connectivity before obtaining HTTPS
 - ❌ Production environments (use HTTPS only)
 
 **Example error for HTTP URLs when `allow_insecure_http: false` is set:**
+
 ```
 Invalid base URL: invalid url scheme: http
 ```
 
 If you disable URL validation or response header filtering, harden your network layer:
+
 - Enforce an egress allowlist for upstream domains/IPs
 - Block private/loopback/link-local ranges
 - Enforce TLS-only outbound traffic
@@ -641,8 +668,20 @@ override this limit.
 The connection cap is coordinated through Redis using a 60-second lease that
 is refreshed every 20 seconds. A process that cannot confirm a lease for a
 full lease lifetime closes its local WebSocket rather than continuing outside
-the global cap. Use `http_bridge` for client-WebSocket/upstream-HTTP operation
-when rolling out or mitigating upstream WebSocket issues.
+the global cap.
+
+Enable the v2 mode router before selecting an account-level WS mode such as
+`http_bridge`:
+
+```yaml
+gateway:
+  openai_ws:
+    mode_router_v2_enabled: true
+```
+
+Or set `GATEWAY_OPENAI_WS_MODE_ROUTER_V2_ENABLED=true` in the environment.
+Use `http_bridge` for client-WebSocket/upstream-HTTP operation when rolling out
+or mitigating upstream WebSocket issues.
 
 #### ⚠️ Important: Creating the Admin Account
 
@@ -730,24 +769,24 @@ Sub2API supports both Grok subscription accounts through xAI OAuth and standard 
 
 The Grok OAuth flow uses PKCE and does not require committing private secrets. The default client details follow the public xAI OAuth flow used by compatible clients, and every value can be overridden by environment variable:
 
-| Variable | Default |
-|----------|---------|
-| `XAI_OAUTH_CLIENT_ID` | Public xAI OAuth client ID |
-| `XAI_OAUTH_SCOPE` | `openid profile email offline_access grok-cli:access api:access` |
-| `XAI_OAUTH_REDIRECT_URI` | `http://127.0.0.1:56121/callback` |
-| `XAI_OAUTH_AUTHORIZE_URL` | `https://auth.x.ai/oauth2/authorize` |
-| `XAI_OAUTH_TOKEN_URL` | `https://auth.x.ai/oauth2/token` |
-| `XAI_BASE_URL` | `https://api.x.ai/v1`; runtime-diagnostics override (account `base_url` controls request forwarding) |
-| `XAI_GROK_CLI_VERSION` | `0.2.93`; optional override for the client identity sent to `cli-chat-proxy.grok.com` |
+| Variable                  | Default                                                                                              |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `XAI_OAUTH_CLIENT_ID`     | Public xAI OAuth client ID                                                                           |
+| `XAI_OAUTH_SCOPE`         | `openid profile email offline_access grok-cli:access api:access`                                     |
+| `XAI_OAUTH_REDIRECT_URI`  | `http://127.0.0.1:56121/callback`                                                                    |
+| `XAI_OAUTH_AUTHORIZE_URL` | `https://auth.x.ai/oauth2/authorize`                                                                 |
+| `XAI_OAUTH_TOKEN_URL`     | `https://auth.x.ai/oauth2/token`                                                                     |
+| `XAI_BASE_URL`            | `https://api.x.ai/v1`; runtime-diagnostics override (account `base_url` controls request forwarding) |
+| `XAI_GROK_CLI_VERSION`    | `0.2.93`; optional override for the client identity sent to `cli-chat-proxy.grok.com`                |
 
 Administrators can create Grok OAuth or API-key accounts from the dashboard. OAuth authorization and reauthorization are also available through the admin API:
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/v1/admin/grok/oauth/auth-url` | Generate an xAI OAuth authorization URL |
-| `POST /api/v1/admin/grok/oauth/exchange-code` | Exchange a callback URL, query string, or code for OAuth credentials |
-| `POST /api/v1/admin/grok/oauth/refresh-token` | Validate or refresh a Grok refresh token |
-| `POST /api/v1/admin/grok/accounts/:id/refresh` | Refresh an existing Grok account |
+| Endpoint                                       | Purpose                                                              |
+| ---------------------------------------------- | -------------------------------------------------------------------- |
+| `POST /api/v1/admin/grok/oauth/auth-url`       | Generate an xAI OAuth authorization URL                              |
+| `POST /api/v1/admin/grok/oauth/exchange-code`  | Exchange a callback URL, query string, or code for OAuth credentials |
+| `POST /api/v1/admin/grok/oauth/refresh-token`  | Validate or refresh a Grok refresh token                             |
+| `POST /api/v1/admin/grok/accounts/:id/refresh` | Refresh an existing Grok account                                     |
 
 OAuth credential storage reuses the existing account JSON fields: `access_token`, `refresh_token`, `token_type`, `expires_at`, `base_url`, optional `email`, optional `subscription_tier`, and `entitlement_status`. OAuth inference defaults to `https://cli-chat-proxy.grok.com/v1`; existing OAuth accounts that stored the old `https://api.x.ai/v1` default are redirected to the subscription proxy at runtime. Explicit custom upstreams remain unchanged.
 
@@ -790,9 +829,9 @@ xAI quota is passive. Sub2API does not invent subscription quota values; it reco
 
 `401` responses temporarily remove accounts with invalid credentials from scheduling. `403` responses are treated as access or entitlement failures instead of token-refresh loops. `429` responses use `Retry-After` or a short cooldown to temporarily remove the account from scheduling.
 
-New Grok image and video generation requests use a media-specific eligibility check. An OAuth account is excluded from new media generation when its recorded weekly or monthly billing probe returns `403`; chat requests and video status lookups are not affected by this media-only quarantine. If no eligible account remains, the media endpoint returns HTTP `503` with error type `grok_media_no_eligible_account` instead of forwarding the request to a known-ineligible account.
+New Grok image and video generation requests use a media-specific eligibility check. API-key accounts remain eligible. OAuth accounts require positive paid-entitlement evidence from the xAI billing probe; Free, forbidden, missing, malformed, and inconclusive billing observations are excluded from new media generation. Unobserved OAuth accounts are probed before the first media request is forwarded, and imports run the billing-first quota probe proactively. Chat requests and video status lookups are not affected by this media-only quarantine. If no eligible account remains, the media endpoint returns HTTP `503` with error type `grok_media_no_eligible_account`.
 
-Administrators can override automatic media eligibility through the account create/update API by setting `extra.grok_media_eligible` to `false` (exclude) or `true` (force eligible). On update, set it to `null` to remove the override and return to automatic probe-based behavior; omitting the field preserves the current override. A missing billing observation does not block legacy routing, and a weekly allowance period by itself is not treated as evidence that the account is ineligible.
+Administrators can override automatic media eligibility through the account create/update API by setting `extra.grok_media_eligible` to `false` (exclude) or `true` (force eligible). On update, set it to `null` to remove the override and return to automatic probe-based behavior; omitting the field preserves the current override. A weekly allowance period alone is not treated as a paid tier signal. Successful image responses must contain at least one actual image output; empty HTTP `200` responses trigger account failover instead of being counted and returned as successful generations.
 
 ---
 
@@ -802,10 +841,10 @@ Sub2API supports [Antigravity](https://antigravity.so/) accounts. After authoriz
 
 ### Dedicated Endpoints
 
-| Endpoint | Model |
-|----------|-------|
+| Endpoint                   | Model         |
+| -------------------------- | ------------- |
 | `/antigravity/v1/messages` | Claude models |
-| `/antigravity/v1beta/` | Gemini models |
+| `/antigravity/v1beta/`     | Gemini models |
 
 ### Claude Code Configuration
 

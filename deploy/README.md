@@ -4,26 +4,27 @@
 
 ## 部署方式
 
-| 方式 | 适用场景 | Setup Wizard |
-|------|----------|--------------|
-| **Docker Compose** | 快速搭建、一体化部署 | 不需要（自动初始化） |
-| **Binary Install** | 生产服务器、systemd 托管 | Web 向导 |
+| 方式               | 适用场景                 | Setup Wizard         |
+| ------------------ | ------------------------ | -------------------- |
+| **Docker Compose** | 快速搭建、一体化部署     | 不需要（自动初始化） |
+| **Binary Install** | 生产服务器、systemd 托管 | Web 向导             |
 
 ## 文件
 
-| 文件 | 说明 |
-|------|------|
-| `docker-compose.yml` | Docker Compose 配置（named volumes） |
-| `docker-compose.local.yml` | Docker Compose 配置（本地目录，便于迁移） |
-| `docker-deploy.sh` | **一键 Docker 部署脚本（推荐）** |
-| `.env.example` | Docker 环境变量模板 |
-| `DOCKER.md` | Docker Hub 文档 |
-| `install.sh` | 一键二进制安装脚本 |
-| `install-datamanagementd.sh` | datamanagementd 一键安装脚本 |
-| `sub2api.service` | Systemd service unit 文件 |
-| `sub2api-datamanagementd.service` | datamanagementd systemd service unit 文件 |
-| `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
-| `config.example.yaml` | 示例配置文件 |
+| 文件                              | 说明                                          |
+| --------------------------------- | --------------------------------------------- |
+| `docker-compose.yml`              | Docker Compose 配置（named volumes）          |
+| `docker-compose.local.yml`        | Docker Compose 配置（本地目录，便于迁移）     |
+| `docker-deploy.sh`                | **一键 Docker 部署脚本（推荐）**              |
+| `.env.example`                    | Docker 环境变量模板                           |
+| `DOCKER.md`                       | Docker Hub 文档                               |
+| `install.sh`                      | 一键二进制安装脚本                            |
+| `install-datamanagementd.sh`      | datamanagementd 一键安装脚本                  |
+| `sub2api.service`                 | Systemd service unit 文件                     |
+| `sub2api-datamanagementd.service` | datamanagementd systemd service unit 文件     |
+| `DATAMANAGEMENTD_CN.md`           | datamanagementd 部署与联动说明（中文）        |
+| `config.example.yaml`             | 示例配置文件                                  |
+| `EDGE_SECURITY.md`                | 反向代理、CDN/WAF、可信代理和入口安全加固指南 |
 
 ---
 
@@ -101,10 +102,10 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 ### 部署版本对比
 
-| 版本 | 数据存储 | 迁移 | 适用场景 |
-|------|----------|------|----------|
+| 版本                         | 数据存储                                                | 迁移                     | 适用场景                    |
+| ---------------------------- | ------------------------------------------------------- | ------------------------ | --------------------------- |
 | **docker-compose.local.yml** | 本地目录（`./data`、`./postgres_data`、`./redis_data`） | 容易（打包整个目录即可） | 生产环境、需要频繁备份/迁移 |
-| **docker-compose.yml** | Named volumes（`/var/lib/docker/volumes/`） | 需要 docker 命令 | 简单搭建、不需要迁移 |
+| **docker-compose.yml**       | Named volumes（`/var/lib/docker/volumes/`）             | 需要 docker 命令         | 简单搭建、不需要迁移        |
 
 **推荐：** 使用 `docker-compose.local.yml`（由 `docker-deploy.sh` 部署），便于数据管理和迁移。
 
@@ -210,19 +211,20 @@ docker compose down -v
 
 ### 环境变量
 
-| 变量 | 必需 | 默认值 | 说明 |
-|------|------|--------|------|
-| `POSTGRES_PASSWORD` | **是** | - | PostgreSQL 密码 |
-| `JWT_SECRET` | **推荐** | 自动生成 | JWT secret，固定后可保持会话长期有效 |
-| `TOTP_ENCRYPTION_KEY` | **推荐** | 自动生成 | TOTP 加密密钥，固定后可保持 2FA 长期有效 |
-| `SERVER_PORT` | 否 | `8080` | 服务端口 |
-| `ADMIN_EMAIL` | 否 | `admin@sub2api.local` | 管理员邮箱 |
-| `ADMIN_PASSWORD` | 否 | 自动生成 | 管理员密码 |
-| `TZ` | 否 | `Asia/Shanghai` | 时区 |
-| `GEMINI_OAUTH_CLIENT_ID` | 否 | 内置 | Google OAuth client ID（Gemini OAuth）。留空则使用内置 Gemini CLI client。 |
-| `GEMINI_OAUTH_CLIENT_SECRET` | 否 | 内置 | Google OAuth client secret（Gemini OAuth）。留空则使用内置 Gemini CLI client。 |
-| `GEMINI_OAUTH_SCOPES` | 否 | 默认值 | OAuth scopes（Gemini OAuth） |
-| `GEMINI_QUOTA_POLICY` | 否 | 空 | Gemini 本地配额模拟 JSON 覆盖值（仅 Code Assist） |
+| 变量                         | 必需     | 默认值                | 说明                                                                           |
+| ---------------------------- | -------- | --------------------- | ------------------------------------------------------------------------------ |
+| `POSTGRES_PASSWORD`          | **是**   | -                     | PostgreSQL 密码                                                                |
+| `JWT_SECRET`                 | **推荐** | 自动生成              | JWT secret，固定后可保持会话长期有效                                           |
+| `TOTP_ENCRYPTION_KEY`        | **推荐** | 自动生成              | TOTP 加密密钥，固定后可保持 2FA 长期有效                                       |
+| `SERVER_PORT`                | 否       | `8080`                | 服务端口                                                                       |
+| `ADMIN_EMAIL`                | 否       | `admin@sub2api.local` | 管理员邮箱                                                                     |
+| `ADMIN_PASSWORD`             | 否       | 自动生成              | 管理员密码                                                                     |
+| `TZ`                         | 否       | `Asia/Shanghai`       | 时区                                                                           |
+| `UPDATE_GITHUB_TOKEN`        | 否       | 空                    | 仅用于 `api.github.com` 的版本检查；下载 release 资源时仍使用匿名请求。        |
+| `GEMINI_OAUTH_CLIENT_ID`     | 否       | 内置                  | Google OAuth client ID（Gemini OAuth）。留空则使用内置 Gemini CLI client。     |
+| `GEMINI_OAUTH_CLIENT_SECRET` | 否       | 内置                  | Google OAuth client secret（Gemini OAuth）。留空则使用内置 Gemini CLI client。 |
+| `GEMINI_OAUTH_SCOPES`        | 否       | 默认值                | OAuth scopes（Gemini OAuth）                                                   |
+| `GEMINI_QUOTA_POLICY`        | 否       | 空                    | Gemini 本地配额模拟 JSON 覆盖值（仅 Code Assist）                              |
 
 所有可用选项见 `.env.example`。
 
@@ -340,13 +342,13 @@ GEMINI_OAUTH_CLIENT_SECRET=GOCSPX-your-client-secret
 
 ### 对比表
 
-| 功能 | Code Assist OAuth | AI Studio OAuth | API Key |
-|------|-------------------|-----------------|---------|
-| 配置复杂度 | 低（无需配置） | 中（需要 OAuth client） | 低 |
-| 是否需要 GCP Project | 是 | 否 | 否 |
-| 自定义 OAuth Client | 否（内置） | 是（必需） | N/A |
-| 速率限制 | GCP quota | 标准 | 标准 |
-| 适用场景 | GCP 开发者 | 需要 OAuth 的普通用户 | 快速测试 |
+| 功能                 | Code Assist OAuth | AI Studio OAuth         | API Key  |
+| -------------------- | ----------------- | ----------------------- | -------- |
+| 配置复杂度           | 低（无需配置）    | 中（需要 OAuth client） | 低       |
+| 是否需要 GCP Project | 是                | 否                      | 否       |
+| 自定义 OAuth Client  | 否（内置）        | 是（必需）              | N/A      |
+| 速率限制             | GCP quota         | 标准                    | 标准     |
+| 适用场景             | GCP 开发者        | 需要 OAuth 的普通用户   | 快速测试 |
 
 ---
 
@@ -587,7 +589,7 @@ Sub2API 支持 TLS 指纹模拟，让请求看起来像来自官方 Claude CLI�
 ```yaml
 gateway:
   tls_fingerprint:
-    enabled: true  # Global switch
+    enabled: true # Global switch
     profiles:
       # Simple profile (uses default cipher suites)
       profile_1:
@@ -609,12 +611,12 @@ gateway:
 
 ### Profile 字段
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `name` | string | 显示名称（必需） |
+| 字段            | 类型     | 说明                               |
+| --------------- | -------- | ---------------------------------- |
+| `name`          | string   | 显示名称（必需）                   |
 | `cipher_suites` | []uint16 | 十进制 cipher suites。空值表示默认 |
-| `curves` | []uint16 | 十进制椭圆曲线。空值表示默认 |
-| `point_formats` | []uint8 | EC point formats。空值表示默认 |
+| `curves`        | []uint16 | 十进制椭圆曲线。空值表示默认       |
+| `point_formats` | []uint8  | EC point formats。空值表示默认     |
 
 ### 常用值参考
 

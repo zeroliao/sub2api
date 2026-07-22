@@ -1,6 +1,8 @@
-# Sub2API
-
 <div align="center">
+
+<img src="assets/logo.svg" alt="Sub2API Logo" width="128" />
+
+# Sub2API
 
 [![Go](https://img.shields.io/badge/Go-1.25.7-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
@@ -79,8 +81,8 @@
 </tr>
 
 <tr>
-<td width="180"><a href="https://api.pptoken.org/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
-<td>PPToken.org のご支援に感謝します！<a href="https://api.pptoken.org/register?promo=SUB2API">PPToken.org</a> は GPT シリーズモデルの API 中継サービスを専門としており、Codex、Claude Code、OpenAI 互換クライアント、Gemini CLI などのツール接続をサポートしています。チャージは 1:1（1元＝1ドル分のクレジット）、GPT モデルは最低 0.16 倍のレート倍率で、総合コストは公式価格の約 2.2% 、最速ファーストトークンは約1秒 — 開発者が低コスト・高速レスポンスで GPT モデル機能にアクセスするのに最適です。テクニカルサポート：24時間365日リアルな人間が対応（ボットではありません）、グループ内で @技術 すれば 10 分以内に返信。スポンサー特典：先着 200 名のユーザーが<a href="https://api.pptoken.org/register?promo=SUB2API">専用登録リンク</a>から登録し、プロモコード `SUB2API` を入力すると、Codex / Claude Code の無料トライアルクレジットを獲得できます — 最低利用額なし、カード登録不要。
+<td width="180"><a href="https://api.pptoken.cc/register?promo=SUB2API"><img src="assets/partners/logos/pptoken.png" alt="pptoken" width="150"></a></td>
+<td>PPToken.cc のご支援に感謝します！<a href="https://api.pptoken.cc/register?promo=SUB2API">PPToken.cc</a> は GPT シリーズモデルの API 中継サービスを専門としており、Codex、Claude Code、OpenAI 互換クライアント、Gemini CLI などのツール接続をサポートしています。チャージは 1:1（1元＝1ドル分のクレジット）、GPT モデルは最低 0.16 倍のレート倍率で、総合コストは公式価格の約 2.2% 、最速ファーストトークンは約1秒 — 開発者が低コスト・高速レスポンスで GPT モデル機能にアクセスするのに最適です。テクニカルサポート：24時間365日リアルな人間が対応（ボットではありません）、グループ内で @技術 すれば 10 分以内に返信。スポンサー特典：先着 200 名のユーザーが<a href="https://api.pptoken.cc/register?promo=SUB2API">専用登録リンク</a>から登録し、プロモコード `SUB2API` を入力すると、Codex / Claude Code の無料トライアルクレジットを獲得できます — 最低利用額なし、カード登録不要。
 </td>
 </tr>
 
@@ -179,6 +181,11 @@
 </td>
 </tr>
 
+<tr>
+<td width="180"><a href="https://nagora.ai/"><img src="assets/partners/logos/nagora.png" alt="Nagora" width="150"></a></td>
+<td><a href="https://nagora.ai/">Nagora</a>は、開発者やチーム向けに設計されたマルチモデルAI APIゲートウェイです。1つのアカウントと1つのAPIキーだけで、26種類以上の主要なテキストモデルおよび画像モデルを一元的に利用できます。OpenAI、Anthropic、Geminiの各プロトコルに対応し、Claude Code、Codex、Gemini CLIなどの開発ツールにもシームレスに接続できます。<br><br>プラットフォームには、インテリジェントルーティング、自動フェイルオーバー、透明性の高い料金体系、請求の一元管理に加え、予算管理、レート制限、同時実行数の制御機能が備わっています。これにより、個人開発、チームでの共同作業、本番環境におけるAI APIの利用を、より安定的かつ柔軟に管理できます。<br><br>既存のアプリケーションを改修する必要はありません。Base URLとAPIキーを置き換えるだけで、最短1分で導入を完了できます。</td>
+</tr>
+
 </table>
 
 ## 概要
@@ -201,19 +208,19 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
 
 Sub2API を拡張・統合するコミュニティプロジェクト:
 
-| プロジェクト | 説明 | 機能 |
-|---------|-------------|----------|
-| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~セルフサービス決済システム~~ | **内蔵済み** — 決済機能は Sub2API に統合されました。別途デプロイは不要です。[決済設定ガイド](docs/PAYMENT.md)をご参照ください |
-| [sub2api-mobile](https://github.com/ckken/sub2api-mobile) | モバイル管理コンソール | ユーザー管理、アカウント管理、監視ダッシュボード、マルチバックエンド切り替えが可能なクロスプラットフォームアプリ（iOS/Android/Web）。Expo + React Native で構築 |
+| プロジェクト                                               | 説明                           | 機能                                                                                                                                                            |
+| ---------------------------------------------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~[Sub2ApiPay](https://github.com/touwaeriol/sub2apipay)~~ | ~~セルフサービス決済システム~~ | **内蔵済み** — 決済機能は Sub2API に統合されました。別途デプロイは不要です。[決済設定ガイド](docs/PAYMENT.md)をご参照ください                                   |
+| [sub2api-mobile](https://github.com/ckken/sub2api-mobile)  | モバイル管理コンソール         | ユーザー管理、アカウント管理、監視ダッシュボード、マルチバックエンド切り替えが可能なクロスプラットフォームアプリ（iOS/Android/Web）。Expo + React Native で構築 |
 
 ## 技術スタック
 
-| コンポーネント | 技術 |
-|-----------|------------|
-| バックエンド | Go 1.25.7, Gin, Ent |
-| フロントエンド | Vue 3.4+, Vite 5+, TailwindCSS |
-| データベース | PostgreSQL 15+ |
-| キャッシュ/キュー | Redis 7+ |
+| コンポーネント    | 技術                           |
+| ----------------- | ------------------------------ |
+| バックエンド      | Go 1.25.7, Gin, Ent            |
+| フロントエンド    | Vue 3.4+, Vite 5+, TailwindCSS |
+| データベース      | PostgreSQL 15+                 |
+| キャッシュ/キュー | Redis 7+                       |
 
 ---
 
@@ -249,6 +256,7 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 ```
 
 スクリプトは以下を実行します:
+
 1. システムアーキテクチャの検出
 2. 最新リリースのダウンロード
 3. バイナリを `/opt/sub2api` にインストール
@@ -269,6 +277,7 @@ sudo systemctl enable sub2api
 ```
 
 セットアップウィザードでは以下の設定を行います:
+
 - データベース設定
 - Redis 設定
 - 管理者アカウントの作成
@@ -278,6 +287,7 @@ sudo systemctl enable sub2api
 **管理ダッシュボード**の左上にある**アップデートを確認**ボタンをクリックすることで、ダッシュボードから直接アップグレードできます。
 
 Web インターフェースでは以下が可能です:
+
 - 新しいバージョンの自動確認
 - ワンクリックでのアップデートのダウンロードと適用
 - 必要に応じたロールバック
@@ -328,6 +338,7 @@ docker compose logs -f sub2api
 ```
 
 **スクリプトの動作内容:**
+
 - `docker-compose.local.yml`（`docker-compose.yml` として保存）と `.env.example` をダウンロード
 - セキュアな認証情報（JWT_SECRET、TOTP_ENCRYPTION_KEY、POSTGRES_PASSWORD）を自動生成
 - 自動生成されたシークレットで `.env` ファイルを作成
@@ -372,6 +383,7 @@ SERVER_PORT=8080
 ```
 
 **セキュアなシークレットの生成方法:**
+
 ```bash
 # JWT_SECRET を生成
 openssl rand -hex 32
@@ -403,10 +415,10 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 
 #### デプロイバージョン
 
-| バージョン | データストレージ | 移行 | 推奨用途 |
-|---------|-------------|-----------|----------|
+| バージョン                   | データストレージ     | 移行                              | 推奨用途                     |
+| ---------------------------- | -------------------- | --------------------------------- | ---------------------------- |
 | **docker-compose.local.yml** | ローカルディレクトリ | ✅ 容易（ディレクトリ全体を tar） | 本番環境、頻繁なバックアップ |
-| **docker-compose.yml** | 名前付きボリューム | ⚠️ docker コマンドが必要 | シンプルなセットアップ |
+| **docker-compose.yml**       | 名前付きボリューム   | ⚠️ docker コマンドが必要          | シンプルなセットアップ       |
 
 **推奨:** データ管理が容易な `docker-compose.local.yml`（スクリプトによるデプロイ）を使用してください。
 
@@ -415,6 +427,7 @@ docker compose -f docker-compose.local.yml logs -f sub2api
 ブラウザで `http://YOUR_SERVER_IP:8080` を開いてください。
 
 管理者パスワードが自動生成された場合は、ログで確認できます:
+
 ```bash
 docker compose -f docker-compose.local.yml logs sub2api | grep "admin password"
 ```
@@ -569,8 +582,17 @@ default:
 - `security.response_headers.enabled` - 設定可能なレスポンスヘッダーフィルタリングを有効化（無効時はデフォルトの許可リストを使用）
 - `security.csp` - Content-Security-Policy ヘッダーの制御
 - `billing.circuit_breaker` - 課金エラー時にフェイルクローズ
-- `server.trusted_proxies` - X-Forwarded-For パースの有効化
+- `security.trust_forwarded_ip_for_api_key_acl` - 従来の生転送ヘッダーによる上書きを制御（アップグレード互換性のため既定で有効）。無効にすると `server.trusted_proxies` を厳格に使用し、Sub2API に直接接続するプロキシの正確な CIDR のみを指定
+- `security.forwarded_client_ip_headers` - サードパーティ CDN のクライアント IP ヘッダーを最大 16 個指定。従来モードが有効な場合のみ、設定順で組み込みヘッダーより先に評価
 - `turnstile.required` - リリースモードでの Turnstile 必須化
+
+カスタムクライアント IP ヘッダーは YAML またはカンマ区切りの環境変数で設定できます:
+
+```bash
+SECURITY_FORWARDED_CLIENT_IP_HEADERS=True-Client-IP,X-CDN-Client-IP
+```
+
+ヘッダー名は検証、正規化、大小文字を区別しない重複排除が行われます。管理画面のセキュリティ設定から再起動せずに更新でき、新規インストールでは YAML/環境変数の既定値を保存し、既存環境ではデータベース値がない場合に補完します。従来モードを無効にするとカスタムおよび組み込みの生転送ヘッダーはすべて無視され、`server.trusted_proxies` のみを使用します。有効にする場合はオリジンへの接続元を CDN/プロキシに制限し、エッジで信頼する全クライアント IP ヘッダーを上書きしてください。移行規則と信頼境界の詳細は [`deploy/EDGE_SECURITY.md`](deploy/EDGE_SECURITY.md) を参照してください。
 
 **⚠️ セキュリティ警告: HTTP URL 設定**
 
@@ -579,8 +601,8 @@ default:
 ```yaml
 security:
   url_allowlist:
-    enabled: false                # 許可リストチェックを無効化
-    allow_insecure_http: false    # HTTPS のみ許可（本番環境推奨）
+    enabled: false # 許可リストチェックを無効化
+    allow_insecure_http: false # HTTPS のみ許可（本番環境推奨）
 ```
 
 **または環境変数で設定:**
@@ -591,22 +613,26 @@ SECURITY_URL_ALLOWLIST_ALLOW_INSECURE_HTTP=false
 ```
 
 **HTTP を許可するリスク:**
+
 - API キーとデータが**平文**で送信される（傍受の危険性）
 - **中間者攻撃（MITM）**を受けやすい
 - **本番環境には不適切**
 
 **HTTP を使用すべき場面:**
+
 - ✅ ローカルサーバーでの開発・テスト（http://localhost）
 - ✅ 信頼できるエンドポイントを持つ内部ネットワーク
 - ✅ HTTPS 取得前のアカウント接続テスト
 - ❌ 本番環境（HTTPS のみを使用）
 
 **`allow_insecure_http: false` 設定時に HTTP URL で表示されるエラー例:**
+
 ```
 Invalid base URL: invalid url scheme: http
 ```
 
 URL バリデーションまたはレスポンスヘッダーフィルタリングを無効にする場合は、ネットワーク層を強化してください:
+
 - 上流ドメイン/IP のエグレス許可リストを適用
 - プライベート/ループバック/リンクローカル範囲をブロック
 - TLS のみのアウトバウンドトラフィックを強制
@@ -676,10 +702,10 @@ Sub2API は [Antigravity](https://antigravity.so/) アカウントをサポー�
 
 ### 専用エンドポイント
 
-| エンドポイント | モデル |
-|----------|-------|
+| エンドポイント             | モデル        |
+| -------------------------- | ------------- |
 | `/antigravity/v1/messages` | Claude モデル |
-| `/antigravity/v1beta/` | Gemini モデル |
+| `/antigravity/v1beta/`     | Gemini モデル |
 
 ### Claude Code の設定
 

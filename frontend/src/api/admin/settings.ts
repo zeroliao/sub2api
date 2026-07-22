@@ -17,54 +17,66 @@ export interface DefaultSubscriptionSetting {
 }
 
 // ── 平台限额类型 ──────────────────────────────────────────────────
-export type PlatformType = "anthropic" | "openai" | "gemini" | "antigravity" | "grok"
-export type QuotaWindowType = "daily" | "weekly" | "monthly"
+export type PlatformType =
+  "anthropic" | "openai" | "gemini" | "antigravity" | "grok";
+export type QuotaWindowType = "daily" | "weekly" | "monthly";
 
 /** 单平台三档限额；null = 不限制，undefined = 未填（等价 null） */
 export interface PlatformQuotaLimits {
-  daily:   number | null
-  weekly:  number | null
-  monthly: number | null
+  daily: number | null;
+  weekly: number | null;
+  monthly: number | null;
 }
 
 /** 全平台默认限额 map（key = PlatformType） */
-export type DefaultPlatformQuotasMap = Partial<Record<PlatformType, PlatformQuotaLimits>>
+export type DefaultPlatformQuotasMap = Partial<
+  Record<PlatformType, PlatformQuotaLimits>
+>;
 
-const PLATFORMS: PlatformType[] = ["anthropic", "openai", "gemini", "antigravity", "grok"]
+const PLATFORMS: PlatformType[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "antigravity",
+  "grok",
+];
 
 /** 归一化为全 4 平台 × 3 窗口（缺失填 null），供模板非空绑定 */
-export function normalizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
-  const result: DefaultPlatformQuotasMap = {}
+export function normalizePlatformQuotasMap(
+  input?: DefaultPlatformQuotasMap | null,
+): DefaultPlatformQuotasMap {
+  const result: DefaultPlatformQuotasMap = {};
   for (const p of PLATFORMS) {
-    const src = input?.[p]
+    const src = input?.[p];
     result[p] = {
-      daily:   typeof src?.daily === "number" ? src.daily : null,
-      weekly:  typeof src?.weekly === "number" ? src.weekly : null,
+      daily: typeof src?.daily === "number" ? src.daily : null,
+      weekly: typeof src?.weekly === "number" ? src.weekly : null,
       monthly: typeof src?.monthly === "number" ? src.monthly : null,
-    }
+    };
   }
-  return result
+  return result;
 }
 
 /** 提交前清洗：非有限数/负数/空字符串 → null（保留 0 = 显式禁用），返回全 4 平台嵌套 map */
-export function sanitizePlatformQuotasMap(input?: DefaultPlatformQuotasMap | null): DefaultPlatformQuotasMap {
-  const clean = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null)
-  const result: DefaultPlatformQuotasMap = {}
+export function sanitizePlatformQuotasMap(
+  input?: DefaultPlatformQuotasMap | null,
+): DefaultPlatformQuotasMap {
+  const clean = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null;
+  const result: DefaultPlatformQuotasMap = {};
   for (const p of PLATFORMS) {
-    const src = input?.[p]
-    result[p] = { daily: clean(src?.daily), weekly: clean(src?.weekly), monthly: clean(src?.monthly) }
+    const src = input?.[p];
+    result[p] = {
+      daily: clean(src?.daily),
+      weekly: clean(src?.weekly),
+      monthly: clean(src?.monthly),
+    };
   }
-  return result
+  return result;
 }
 
 export type AuthSourceType =
-  | "email"
-  | "linuxdo"
-  | "oidc"
-  | "wechat"
-  | "github"
-  | "google"
-  | "dingtalk";
+  "email" | "linuxdo" | "oidc" | "wechat" | "github" | "google" | "dingtalk";
 
 export interface AuthSourceDefaultsValue {
   balance: number;
@@ -236,7 +248,10 @@ export function buildAuthSourceDefaultsState(
         raw[`auth_source_default_${source}_grant_on_signup`] === true,
       grant_on_first_bind:
         raw[`auth_source_default_${source}_grant_on_first_bind`] === true,
-      platform_quotas: normalizePlatformQuotasMap(raw[`auth_source_default_${source}_platform_quotas`] as DefaultPlatformQuotasMap | undefined),
+      platform_quotas: normalizePlatformQuotasMap(
+        raw[`auth_source_default_${source}_platform_quotas`] as
+          DefaultPlatformQuotasMap | undefined,
+      ),
     };
     return acc;
   }, {} as AuthSourceDefaultsState);
@@ -264,7 +279,8 @@ export function appendAuthSourceDefaultsToUpdateRequest(
       current.grant_on_signup;
     target[`auth_source_default_${source}_grant_on_first_bind`] =
       current.grant_on_first_bind;
-    target[`auth_source_default_${source}_platform_quotas`] = sanitizePlatformQuotasMap(current.platform_quotas)
+    target[`auth_source_default_${source}_platform_quotas`] =
+      sanitizePlatformQuotasMap(current.platform_quotas);
   }
 
   return payload;
@@ -455,6 +471,7 @@ export interface SystemSettings {
   turnstile_site_key: string;
   turnstile_secret_key_configured: boolean;
   api_key_acl_trust_forwarded_ip: boolean;
+  forwarded_client_ip_headers: string[];
 
   // LinuxDo Connect OAuth settings
   linuxdo_connect_enabled: boolean;
@@ -757,6 +774,7 @@ export interface UpdateSettingsRequest {
   turnstile_site_key?: string;
   turnstile_secret_key?: string;
   api_key_acl_trust_forwarded_ip?: boolean;
+  forwarded_client_ip_headers?: string[];
   linuxdo_connect_enabled?: boolean;
   linuxdo_connect_client_id?: string;
   linuxdo_connect_client_secret?: string;

@@ -16,6 +16,8 @@ const {
   getStreamTimeoutSettings,
   getRectifierSettings,
   getBetaPolicySettings,
+  getUpstreamBillingProbeSettings,
+  updateUpstreamBillingProbeSettings,
   getGroups,
   listProxies,
   getProviders,
@@ -38,6 +40,13 @@ const {
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
+  getUpstreamBillingProbeSettings: vi.fn().mockResolvedValue({
+    enabled: true,
+    interval_minutes: 30,
+  }),
+  updateUpstreamBillingProbeSettings: vi
+    .fn()
+    .mockImplementation(async (payload) => payload),
   getGroups: vi.fn(),
   listProxies: vi.fn(),
   getProviders: vi.fn(),
@@ -66,6 +75,10 @@ vi.mock("@/api", () => ({
       getStreamTimeoutSettings,
       getRectifierSettings,
       getBetaPolicySettings,
+    },
+    accounts: {
+      getUpstreamBillingProbeSettings,
+      updateUpstreamBillingProbeSettings,
     },
     groups: {
       getAll: getGroups,
@@ -112,67 +125,104 @@ vi.mock("vue-i18n", async () => {
   const actual = await vi.importActual<typeof import("vue-i18n")>("vue-i18n");
   const translations: Record<string, string> = {
     "admin.settings.wechatConnect.title": "微信登录",
-    "admin.settings.wechatConnect.description": "用于微信开放平台或公众号/小程序的第三方登录配置。",
+    "admin.settings.wechatConnect.description":
+      "用于微信开放平台或公众号/小程序的第三方登录配置。",
     "admin.settings.wechatConnect.enabledLabel": "启用微信登录",
-    "admin.settings.wechatConnect.enabledHint": "开启后可使用微信第三方登录回调与授权配置。",
+    "admin.settings.wechatConnect.enabledHint":
+      "开启后可使用微信第三方登录回调与授权配置。",
     "admin.settings.wechatConnect.appIdLabel": "AppID",
     "admin.settings.wechatConnect.appIdPlaceholder": "微信开放平台 AppID",
     "admin.settings.wechatConnect.appSecretLabel": "AppSecret",
-    "admin.settings.wechatConnect.appSecretConfiguredPlaceholder": "密钥已配置，留空以保留当前值。",
-    "admin.settings.wechatConnect.appSecretPlaceholder": "微信开放平台 AppSecret",
-    "admin.settings.wechatConnect.appSecretConfiguredHint": "密钥已配置，留空以保留当前值。",
+    "admin.settings.wechatConnect.appSecretConfiguredPlaceholder":
+      "密钥已配置，留空以保留当前值。",
+    "admin.settings.wechatConnect.appSecretPlaceholder":
+      "微信开放平台 AppSecret",
+    "admin.settings.wechatConnect.appSecretConfiguredHint":
+      "密钥已配置，留空以保留当前值。",
     "admin.settings.wechatConnect.appSecretHint": "填写后会覆盖当前微信密钥。",
     "admin.settings.wechatConnect.modeLabel": "模式",
     "admin.settings.wechatConnect.openModeLabel": "非微信环境使用开放平台",
-    "admin.settings.wechatConnect.openModeHint": "浏览器不在微信内时，自动走开放平台扫码授权。",
+    "admin.settings.wechatConnect.openModeHint":
+      "浏览器不在微信内时，自动走开放平台扫码授权。",
     "admin.settings.wechatConnect.mpModeLabel": "微信环境使用公众号",
-    "admin.settings.wechatConnect.mpModeHint": "浏览器在微信内时，自动走公众号授权。",
+    "admin.settings.wechatConnect.mpModeHint":
+      "浏览器在微信内时，自动走公众号授权。",
     "admin.settings.wechatConnect.redirectUrlLabel": "回调地址",
-    "admin.settings.wechatConnect.redirectUrlPlaceholder": "https://your-site.com/api/v1/auth/oauth/wechat/callback",
+    "admin.settings.wechatConnect.redirectUrlPlaceholder":
+      "https://your-site.com/api/v1/auth/oauth/wechat/callback",
     "admin.settings.wechatConnect.generateAndCopy": "使用当前站点生成并复制",
-    "admin.settings.wechatConnect.redirectUrlSetAndCopied": "已使用当前站点生成回调地址并复制到剪贴板",
+    "admin.settings.wechatConnect.redirectUrlSetAndCopied":
+      "已使用当前站点生成回调地址并复制到剪贴板",
     "admin.settings.wechatConnect.frontendRedirectUrlLabel": "前端回调地址",
-    "admin.settings.wechatConnect.frontendRedirectUrlPlaceholder": "/auth/wechat/callback",
-    "admin.settings.wechatConnect.frontendRedirectUrlHint": "通常用于前端路由回调地址，需与后端配置保持一致。",
+    "admin.settings.wechatConnect.frontendRedirectUrlPlaceholder":
+      "/auth/wechat/callback",
+    "admin.settings.wechatConnect.frontendRedirectUrlHint":
+      "通常用于前端路由回调地址，需与后端配置保持一致。",
     "admin.settings.authSourceDefaults.title": "认证来源默认值",
-    "admin.settings.authSourceDefaults.description": "按注册来源配置新用户默认余额、并发、订阅与授权策略。",
-    "admin.settings.authSourceDefaults.requireEmailLabel": "第三方注册强制补充邮箱",
-    "admin.settings.authSourceDefaults.requireEmailHint": "启用后，Linux DO、OIDC、微信注册缺少邮箱时必须先补充邮箱地址。",
-    "admin.settings.authSourceDefaults.enabledHint": "以下默认值会在该来源注册新用户时发放；首次绑定时授权仅作用于已有账号绑定该来源。",
+    "admin.settings.authSourceDefaults.description":
+      "按注册来源配置新用户默认余额、并发、订阅与授权策略。",
+    "admin.settings.authSourceDefaults.requireEmailLabel":
+      "第三方注册强制补充邮箱",
+    "admin.settings.authSourceDefaults.requireEmailHint":
+      "启用后，Linux DO、OIDC、微信注册缺少邮箱时必须先补充邮箱地址。",
+    "admin.settings.authSourceDefaults.enabledHint":
+      "以下默认值会在该来源注册新用户时发放；首次绑定时授权仅作用于已有账号绑定该来源。",
     "admin.settings.authSourceDefaults.sources.email.title": "邮箱注册",
-    "admin.settings.authSourceDefaults.sources.email.description": "适用于邮箱密码注册的新用户默认配额。",
+    "admin.settings.authSourceDefaults.sources.email.description":
+      "适用于邮箱密码注册的新用户默认配额。",
     "admin.settings.authSourceDefaults.sources.linuxdo.title": "Linux DO 登录",
-    "admin.settings.authSourceDefaults.sources.linuxdo.description": "适用于 Linux DO 第三方注册的新用户默认配额。",
+    "admin.settings.authSourceDefaults.sources.linuxdo.description":
+      "适用于 Linux DO 第三方注册的新用户默认配额。",
     "admin.settings.authSourceDefaults.sources.oidc.title": "OIDC 登录",
-    "admin.settings.authSourceDefaults.sources.oidc.description": "适用于 OIDC 第三方注册的新用户默认配额。",
+    "admin.settings.authSourceDefaults.sources.oidc.description":
+      "适用于 OIDC 第三方注册的新用户默认配额。",
     "admin.settings.authSourceDefaults.sources.wechat.title": "微信登录",
-    "admin.settings.authSourceDefaults.sources.wechat.description": "适用于微信第三方注册的新用户默认配额。",
+    "admin.settings.authSourceDefaults.sources.wechat.description":
+      "适用于微信第三方注册的新用户默认配额。",
     "admin.settings.authSourceDefaults.grantOnFirstBindLabel": "首次绑定时授权",
-    "admin.settings.authSourceDefaults.grantOnFirstBindHint": "已有账号首次绑定该来源时发放默认权益。",
+    "admin.settings.authSourceDefaults.grantOnFirstBindHint":
+      "已有账号首次绑定该来源时发放默认权益。",
     "admin.settings.authSourceDefaults.defaultSubscriptionsLabel": "默认订阅",
-    "admin.settings.authSourceDefaults.defaultSubscriptionsHint": "仅对当前认证来源生效，未配置时不追加来源专属订阅。",
-    "admin.settings.authSourceDefaults.noSourceSubscriptions": "当前来源未配置专属默认订阅。",
+    "admin.settings.authSourceDefaults.defaultSubscriptionsHint":
+      "仅对当前认证来源生效，未配置时不追加来源专属订阅。",
+    "admin.settings.authSourceDefaults.noSourceSubscriptions":
+      "当前来源未配置专属默认订阅。",
     "admin.settings.paymentVisibleMethods.methodLabel": "{title} 可见方式",
-    "admin.settings.paymentVisibleMethods.methodHint": "控制前台结算页是否展示该方式，以及展示时使用的来源键。",
+    "admin.settings.paymentVisibleMethods.methodHint":
+      "控制前台结算页是否展示该方式，以及展示时使用的来源键。",
     "admin.settings.paymentVisibleMethods.sourceLabel": "支付来源",
-    "admin.settings.paymentVisibleMethods.sourceHint": "启用后必须明确选择一个来源；未配置状态不会对外展示该支付方式。",
-    "admin.settings.paymentVisibleMethods.sourceRequiredError": "{title} 已启用，请先选择支付来源。",
+    "admin.settings.paymentVisibleMethods.sourceHint":
+      "启用后必须明确选择一个来源；未配置状态不会对外展示该支付方式。",
+    "admin.settings.paymentVisibleMethods.sourceRequiredError":
+      "{title} 已启用，请先选择支付来源。",
     "admin.settings.payment.configGuide": "查看支付配置说明",
     "admin.settings.payment.findProvider": "查看支持的支付方式",
     "admin.settings.openaiExperimentalScheduler.title": "OpenAI 实验调度策略",
-    "admin.settings.openaiExperimentalScheduler.description": "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle": "低倍率优先",
-    "admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription": "开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateTitle": "OAuth 调度参考倍率",
-    "admin.settings.openaiExperimentalScheduler.oauthRatePriorityDescription": "同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。",
-    "admin.settings.openaiExperimentalScheduler.oauthRateWeightedDescription": "同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedTitle": "粘性加权",
-    "admin.settings.openaiExperimentalScheduler.stickyWeightedDescription": "开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityTitle": "订阅优先",
-    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityDescription": "开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。",
+    "admin.settings.openaiExperimentalScheduler.description":
+      "默认关闭。开启后仅影响本网关在 OpenAI 账号间的实验性调度选择逻辑，不代表上游 OpenAI 官方能力。",
+    "admin.settings.openaiExperimentalScheduler.lowRatePriorityTitle":
+      "低倍率优先",
+    "admin.settings.openaiExperimentalScheduler.lowRatePriorityDescription":
+      "开启后优先选择计费倍率较低的账号；倍率相同时，再比较账号优先级和当前负载等。启用实验调度策略后，此开关不生效。",
+    "admin.settings.openaiExperimentalScheduler.oauthRateTitle":
+      "OAuth 调度参考倍率",
+    "admin.settings.openaiExperimentalScheduler.oauthRatePriorityDescription":
+      "同一分组同时包含 API Key 和 OAuth 账号时，OAuth 账号按此倍率与已探测的 API Key 计费倍率一起排序。",
+    "admin.settings.openaiExperimentalScheduler.oauthRateWeightedDescription":
+      "同一分组同时包含 API Key 和 OAuth 账号时，计算“计费倍率”得分时，OAuth 账号按此倍率参与计算。",
+    "admin.settings.openaiExperimentalScheduler.stickyWeightedTitle":
+      "粘性加权",
+    "admin.settings.openaiExperimentalScheduler.stickyWeightedDescription":
+      "开启后 previous_response_id 和 session_hash 粘性进入高级调度打分；关闭时仍按旧逻辑硬命中粘性账号。",
+    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityTitle":
+      "订阅优先",
+    "admin.settings.openaiExperimentalScheduler.subscriptionPriorityDescription":
+      "开启后先在 ChatGPT 订阅账号池中按权值选取；订阅池拿不到席位时再回退到非订阅账号池。",
     "admin.settings.openaiExperimentalScheduler.weightsTitle": "调度权值覆盖",
-    "admin.settings.openaiExperimentalScheduler.weightsDescription": "留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。",
-    "admin.settings.openaiExperimentalScheduler.defaultPlaceholder": "配置/默认：{value}",
+    "admin.settings.openaiExperimentalScheduler.weightsDescription":
+      "留空时使用配置/环境变量值；配置未设置时使用内置默认值。页面非空设置优先。",
+    "admin.settings.openaiExperimentalScheduler.defaultPlaceholder":
+      "配置/默认：{value}",
     "admin.settings.openaiExperimentalScheduler.topKLabel": "TopK",
     "admin.settings.openaiExperimentalScheduler.priorityWeight": "优先级",
     "admin.settings.openaiExperimentalScheduler.loadWeight": "负载",
@@ -180,10 +230,24 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.openaiExperimentalScheduler.errorRateWeight": "错误率",
     "admin.settings.openaiExperimentalScheduler.ttftWeight": "首包延迟",
     "admin.settings.openaiExperimentalScheduler.resetWeight": "重置窗口",
-    "admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight": "额度余量",
+    "admin.settings.openaiExperimentalScheduler.quotaHeadroomWeight":
+      "额度余量",
     "admin.settings.openaiExperimentalScheduler.upstreamCostWeight": "计费倍率",
-    "admin.settings.openaiExperimentalScheduler.previousResponseWeight": "previous_response 粘性",
-    "admin.settings.openaiExperimentalScheduler.sessionStickyWeight": "session_hash 粘性",
+    "admin.settings.openaiExperimentalScheduler.previousResponseWeight":
+      "previous_response 粘性",
+    "admin.settings.openaiExperimentalScheduler.sessionStickyWeight":
+      "session_hash 粘性",
+    "admin.settings.upstreamBillingProbe.title": "上游倍率自动探测",
+    "admin.settings.upstreamBillingProbe.description":
+      "定期获取 OpenAI API Key 所连接上游 Sub2API 站点声明的计费倍率。",
+    "admin.settings.upstreamBillingProbe.enabled": "启用全局自动探测",
+    "admin.settings.upstreamBillingProbe.enabledHint":
+      "开启后，仅对账号自身已启用自动检测的账号执行定时探测。",
+    "admin.settings.upstreamBillingProbe.intervalMinutes": "探测周期（分钟）",
+    "admin.settings.upstreamBillingProbe.intervalHint": "范围 5–1440 分钟。",
+    "admin.settings.upstreamBillingProbe.saved": "上游倍率自动探测设置已保存",
+    "admin.settings.upstreamBillingProbe.saveFailed":
+      "保存上游倍率自动探测设置失败",
     "admin.settings.site.uploadImage": "上传图片",
     "admin.settings.site.remove": "移除",
     "admin.settings.platformQuota.platform": "平台",
@@ -191,17 +255,24 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.platformQuota.weekly": "周限额 (USD)",
     "admin.settings.platformQuota.monthly": "月限额 (USD, 30天滚动)",
     "admin.settings.platformQuota.placeholder": "不限",
-    "admin.settings.defaults.defaultPlatformQuotas": "默认平台限额（注册时分配）",
-    "admin.settings.defaults.defaultPlatformQuotasHint": "新用户注册时自动写入平台限额记录；已有用户不受影响。留空 = 该平台该窗口不限制。",
-    "admin.settings.defaults.platformQuotaNotice": "月限额为 30 天滚动窗口，非自然月",
+    "admin.settings.defaults.defaultPlatformQuotas":
+      "默认平台限额（注册时分配）",
+    "admin.settings.defaults.defaultPlatformQuotasHint":
+      "新用户注册时自动写入平台限额记录；已有用户不受影响。留空 = 该平台该窗口不限制。",
+    "admin.settings.defaults.platformQuotaNotice":
+      "月限额为 30 天滚动窗口，非自然月",
     "admin.settings.authSourceDefaults.platformQuotasOverride": "平台限额覆盖",
-    "admin.settings.authSourceDefaults.platformQuotasOverrideHint": "留空的字段继承「系统默认平台限额」；填 0 表示禁止该窗口使用。",
+    "admin.settings.authSourceDefaults.platformQuotasOverrideHint":
+      "留空的字段继承「系统默认平台限额」；填 0 表示禁止该窗口使用。",
   };
   return {
     ...actual,
     useI18n: () => ({
       t: (key: string, params?: Record<string, string>) =>
-        (translations[key] ?? key).replace(/\{(\w+)\}/g, (_, token) => params?.[token] ?? `{${token}}`),
+        (translations[key] ?? key).replace(
+          /\{(\w+)\}/g,
+          (_, token) => params?.[token] ?? `{${token}}`,
+        ),
       locale: localeRef,
     }),
   };
@@ -348,6 +419,8 @@ const baseSettingsResponse = {
   turnstile_enabled: false,
   turnstile_site_key: "",
   turnstile_secret_key_configured: false,
+  api_key_acl_trust_forwarded_ip: true,
+  forwarded_client_ip_headers: [],
   linuxdo_connect_enabled: false,
   linuxdo_connect_client_id: "",
   linuxdo_connect_client_secret_configured: false,
@@ -469,9 +542,9 @@ const baseSettingsResponse = {
   account_quota_notify_emails: [],
   // 平台限额嵌套字段（新后端契约）
   default_platform_quotas: {
-    anthropic:   { daily: null, weekly: null, monthly: null },
-    openai:      { daily: null, weekly: 12.5, monthly: null },
-    gemini:      { daily: null, weekly: null, monthly: 200 },
+    anthropic: { daily: null, weekly: null, monthly: null },
+    openai: { daily: null, weekly: 12.5, monthly: null },
+    gemini: { daily: null, weekly: null, monthly: 200 },
     antigravity: { daily: null, weekly: null, monthly: null },
   },
 };
@@ -517,6 +590,16 @@ async function openSecurityTab(wrapper: ReturnType<typeof mountView>) {
   await flushPromises();
 }
 
+async function openGatewayTab(wrapper: ReturnType<typeof mountView>) {
+  const gatewayTabButton = wrapper
+    .findAll("button")
+    .find((node) => node.text().includes("admin.settings.tabs.gateway"));
+
+  expect(gatewayTabButton).toBeDefined();
+  await gatewayTabButton?.trigger("click");
+  await flushPromises();
+}
+
 async function openUsersTab(wrapper: ReturnType<typeof mountView>) {
   const usersTabButton = wrapper
     .findAll("button")
@@ -540,6 +623,8 @@ describe("admin SettingsView payment visible method controls", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    getUpstreamBillingProbeSettings.mockReset();
+    updateUpstreamBillingProbeSettings.mockReset();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -577,7 +662,9 @@ describe("admin SettingsView payment visible method controls", () => {
       enabled: true,
       cooldown_seconds: 5,
     });
-    updateRateLimit429CooldownSettings.mockImplementation(async (payload) => payload);
+    updateRateLimit429CooldownSettings.mockImplementation(
+      async (payload) => payload,
+    );
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
       action: "temp_unsched",
@@ -595,6 +682,13 @@ describe("admin SettingsView payment visible method controls", () => {
     getBetaPolicySettings.mockResolvedValue({
       rules: [],
     });
+    getUpstreamBillingProbeSettings.mockResolvedValue({
+      enabled: true,
+      interval_minutes: 30,
+    });
+    updateUpstreamBillingProbeSettings.mockImplementation(
+      async (payload) => payload,
+    );
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({
       items: [],
@@ -614,6 +708,74 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(wrapper.text()).not.toContain("可见方式");
     expect(wrapper.text()).not.toContain("支付来源");
+  });
+
+  it("loads, edits, validates, and saves forwarded client-IP headers", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      api_key_acl_trust_forwarded_ip: false,
+      forwarded_client_ip_headers: ["cf-connecting-ip", "X-Real-IP"],
+    });
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openSecurityTab(wrapper);
+
+    const card = wrapper
+      .findAll(".card")
+      .find((node) => node.text().includes("admin.settings.apiKeyAcl.title"));
+    expect(card).toBeDefined();
+    const toggle = card!.get('input[type="checkbox"]');
+    expect((toggle.element as HTMLInputElement).checked).toBe(false);
+    expect(
+      card!.find('[data-testid="forwarded-client-ip-headers-input"]').exists(),
+    ).toBe(false);
+
+    await toggle.setValue(true);
+    expect(
+      card!.findAll('[data-testid="forwarded-client-ip-header-tag"]'),
+    ).toHaveLength(2);
+    expect(card!.text()).toContain("Cf-Connecting-Ip");
+    expect(card!.text()).toContain("X-Real-Ip");
+    showError.mockClear();
+
+    const input = card!.get(
+      '[data-testid="forwarded-client-ip-headers-input"]',
+    );
+    await input.setValue("x-client-ip");
+    await input.trigger("keydown", { key: "Enter" });
+    await input.setValue("X-CLIENT-IP");
+    await input.trigger("keydown", { key: "Enter" });
+    await input.setValue("invalid header");
+    await input.trigger("keydown", { key: "Enter" });
+    expect(showError).toHaveBeenCalledTimes(1);
+    expect(
+      card!.findAll('[data-testid="forwarded-client-ip-header-tag"]'),
+    ).toHaveLength(3);
+
+    const realIpTag = card!
+      .findAll('[data-testid="forwarded-client-ip-header-tag"]')
+      .find((tag) => tag.text().includes("X-Real-Ip"));
+    expect(realIpTag).toBeDefined();
+    await realIpTag!.get("button").trigger("click");
+    expect(card!.text()).not.toContain("X-Real-Ip");
+
+    await toggle.setValue(false);
+    expect(
+      card!.find('[data-testid="forwarded-client-ip-headers-input"]').exists(),
+    ).toBe(false);
+    await toggle.setValue(true);
+    expect(card!.text()).toContain("X-Client-Ip");
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        api_key_acl_trust_forwarded_ip: true,
+        forwarded_client_ip_headers: ["Cf-Connecting-Ip", "X-Client-Ip"],
+      }),
+    );
   });
 
   it("links payment guidance to README sections instead of removed payment docs", async () => {
@@ -848,15 +1010,61 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(wrapper.text()).not.toContain("OpenAI 高级调度器");
   });
 
+  it("loads and saves upstream billing probe settings from the gateway tab", async () => {
+    getUpstreamBillingProbeSettings.mockResolvedValueOnce({
+      enabled: false,
+      interval_minutes: 45,
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await openGatewayTab(wrapper);
+
+    const card = wrapper.get('[data-testid="upstream-billing-probe-settings"]');
+    expect(card.isVisible()).toBe(true);
+    expect(card.text()).toContain("上游倍率自动探测");
+    expect(
+      (
+        card.get('[data-testid="upstream-billing-probe-enabled"]')
+          .element as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(
+      card.find('[data-testid="upstream-billing-probe-interval"]').exists(),
+    ).toBe(false);
+
+    await card
+      .get('[data-testid="upstream-billing-probe-enabled"]')
+      .setValue(true);
+    await card
+      .get('[data-testid="upstream-billing-probe-interval"]')
+      .setValue(60);
+    await card
+      .get('[data-testid="upstream-billing-probe-save"]')
+      .trigger("click");
+    await flushPromises();
+
+    expect(updateUpstreamBillingProbeSettings).toHaveBeenCalledWith({
+      enabled: true,
+      interval_minutes: 60,
+    });
+    expect(showSuccess).toHaveBeenCalledWith("上游倍率自动探测设置已保存");
+  });
+
   it("places and explains rate controls for both scheduling modes", async () => {
     const wrapper = mountView();
 
     await flushPromises();
     expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
+      wrapper
+        .find('[data-testid="openai-oauth-scheduling-rate-multiplier"]')
+        .exists(),
     ).toBe(false);
 
-    const lowRateToggle = wrapper.get('[data-testid="openai-low-rate-priority-toggle"]');
+    const lowRateToggle = wrapper.get(
+      '[data-testid="openai-low-rate-priority-toggle"]',
+    );
     await lowRateToggle.setValue(true);
     const priorityModeText = wrapper.text();
     expect(priorityModeText).toContain(
@@ -890,7 +1098,9 @@ describe("admin SettingsView payment visible method controls", () => {
       wrapper.find('[data-testid="openai-low-rate-priority-toggle"]').exists(),
     ).toBe(false);
     expect(
-      wrapper.find('[data-testid="openai-oauth-scheduling-rate-multiplier"]').exists(),
+      wrapper
+        .find('[data-testid="openai-oauth-scheduling-rate-multiplier"]')
+        .exists(),
     ).toBe(true);
     const weightedModeText = wrapper.text();
     expect(weightedModeText).toContain(
@@ -918,12 +1128,18 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(imageUploads.length).toBeGreaterThan(0);
 
     const paymentHelpImageUpload = imageUploads.find(
-      (node) => node.attributes("data-placeholder") === "admin.settings.payment.helpImagePlaceholder",
+      (node) =>
+        node.attributes("data-placeholder") ===
+        "admin.settings.payment.helpImagePlaceholder",
     );
 
     expect(paymentHelpImageUpload).toBeDefined();
-    expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe("上传图片");
-    expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe("移除");
+    expect(paymentHelpImageUpload?.attributes("data-upload-label")).toBe(
+      "上传图片",
+    );
+    expect(paymentHelpImageUpload?.attributes("data-remove-label")).toBe(
+      "移除",
+    );
   });
 
   it("normalizes null supported_types from API so provider card stays visible", async () => {
@@ -1044,7 +1260,9 @@ describe("admin SettingsView wechat connect controls", () => {
       enabled: true,
       cooldown_seconds: 5,
     });
-    updateRateLimit429CooldownSettings.mockImplementation(async (payload) => payload);
+    updateRateLimit429CooldownSettings.mockImplementation(
+      async (payload) => payload,
+    );
     getStreamTimeoutSettings.mockResolvedValue({
       enabled: true,
       action: "temp_unsched",
@@ -1126,7 +1344,9 @@ describe("admin SettingsView wechat connect controls", () => {
 
     const link = wrapper.get('[data-testid="github-oauth-apps-guide-link"]');
     expect(link.text()).toContain("OAuth Apps");
-    expect(link.attributes("href")).toBe("https://github.com/settings/developers");
+    expect(link.attributes("href")).toBe(
+      "https://github.com/settings/developers",
+    );
     expect(link.attributes("target")).toBe("_blank");
     expect(link.attributes("rel")).toContain("noopener");
   });
@@ -1267,8 +1487,14 @@ describe("admin SettingsView platform quota matrix", () => {
       ...baseSettingsResponse,
       ...payload,
     }));
-    getWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
-    updateWebSearchEmulationConfig.mockResolvedValue({ enabled: false, providers: [] });
+    getWebSearchEmulationConfig.mockResolvedValue({
+      enabled: false,
+      providers: [],
+    });
+    updateWebSearchEmulationConfig.mockResolvedValue({
+      enabled: false,
+      providers: [],
+    });
     getAdminApiKey.mockResolvedValue({ exists: false, masked_key: "" });
     getOverloadCooldownSettings.mockResolvedValue({});
     getRateLimit429CooldownSettings.mockResolvedValue({});
@@ -1311,7 +1537,10 @@ describe("admin SettingsView platform quota matrix", () => {
 
     // 应携带嵌套对象，而非扁平字段
     expect(payload).toHaveProperty("default_platform_quotas");
-    const quotas = payload["default_platform_quotas"] as Record<string, unknown>;
+    const quotas = payload["default_platform_quotas"] as Record<
+      string,
+      unknown
+    >;
     const platforms = ["anthropic", "openai", "gemini", "antigravity", "grok"];
     for (const p of platforms) {
       expect(quotas).toHaveProperty(p);
@@ -1322,7 +1551,9 @@ describe("admin SettingsView platform quota matrix", () => {
     }
 
     // 不应存在旧扁平字段
-    expect(payload).not.toHaveProperty("default_platform_quota_anthropic_daily");
+    expect(payload).not.toHaveProperty(
+      "default_platform_quota_anthropic_daily",
+    );
     expect(payload).not.toHaveProperty("default_platform_quota_openai_weekly");
   });
 
@@ -1331,7 +1562,7 @@ describe("admin SettingsView platform quota matrix", () => {
       ...baseSettingsResponse,
       default_platform_quotas: {
         anthropic: { daily: 5, weekly: null, monthly: null },
-        openai:    { daily: null, weekly: 12.5, monthly: null },
+        openai: { daily: null, weekly: 12.5, monthly: null },
         // gemini / antigravity 缺失 → 应被归一化为全 null
       },
     });
@@ -1343,24 +1574,38 @@ describe("admin SettingsView platform quota matrix", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    const payload = updateSettings.mock.calls.at(-1)![0] as Record<string, unknown>;
-    const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
+    const payload = updateSettings.mock.calls.at(-1)![0] as Record<
+      string,
+      unknown
+    >;
+    const quotas = payload["default_platform_quotas"] as Record<
+      string,
+      Record<string, unknown>
+    >;
 
     expect(quotas["anthropic"]?.["daily"]).toBe(5);
     expect(quotas["openai"]?.["weekly"]).toBe(12.5);
     // 缺失平台应补全为 null
-    expect(quotas["gemini"]).toEqual({ daily: null, weekly: null, monthly: null });
-    expect(quotas["antigravity"]).toEqual({ daily: null, weekly: null, monthly: null });
+    expect(quotas["gemini"]).toEqual({
+      daily: null,
+      weekly: null,
+      monthly: null,
+    });
+    expect(quotas["antigravity"]).toEqual({
+      daily: null,
+      weekly: null,
+      monthly: null,
+    });
   });
 
-  it("空输入（v-model.number 产出 \"\"）在提交时清洗为 null 而非空字符串", async () => {
+  it('空输入（v-model.number 产出 ""）在提交时清洗为 null 而非空字符串', async () => {
     // 模拟后端返回带有 anthropic daily 值的配额
     getSettings.mockResolvedValueOnce({
       ...baseSettingsResponse,
       default_platform_quotas: {
         anthropic: { daily: 10, weekly: null, monthly: null },
-        openai:    { daily: null, weekly: null, monthly: null },
-        gemini:    { daily: null, weekly: null, monthly: null },
+        openai: { daily: null, weekly: null, monthly: null },
+        gemini: { daily: null, weekly: null, monthly: null },
         antigravity: { daily: null, weekly: null, monthly: null },
       },
     });
@@ -1384,8 +1629,14 @@ describe("admin SettingsView platform quota matrix", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    const payload = updateSettings.mock.calls.at(-1)![0] as Record<string, unknown>;
-    const quotas = payload["default_platform_quotas"] as Record<string, Record<string, unknown>>;
+    const payload = updateSettings.mock.calls.at(-1)![0] as Record<
+      string,
+      unknown
+    >;
+    const quotas = payload["default_platform_quotas"] as Record<
+      string,
+      Record<string, unknown>
+    >;
     // 不管输入是什么，提交值应为 null（而非 "" 或 NaN）
     expect(quotas["anthropic"]?.["daily"]).toBe(null);
   });
