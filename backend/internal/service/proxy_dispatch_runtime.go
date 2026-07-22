@@ -28,13 +28,6 @@ func resolveRuntimeProxyURL(ctx context.Context, account *Account, settingServic
 	return "", noAvailableProxyError(account, mode)
 }
 
-func resolveRuntimeProxyURLAllowCustomRelay(ctx context.Context, account *Account, settingService *SettingService) (string, error) {
-	if account != nil && account.IsCustomBaseURLEnabled() && account.GetCustomBaseURL() != "" {
-		return "", nil
-	}
-	return resolveRuntimeProxyURL(ctx, account, settingService)
-}
-
 func runtimeDirectFallbackMode(ctx context.Context, settingService *SettingService) string {
 	// Keep legacy in-memory unit-test services working when they do not wire settings.
 	if settingService == nil || settingService.settingRepo == nil {
