@@ -287,7 +287,6 @@ func ProvideAccountTestService(
 	proxyHealthReporter AdminService,
 	tlsFPProfileService *TLSFingerprintProfileService,
 	openAIGatewayService *OpenAIGatewayService,
-	settingService *SettingService,
 ) *AccountTestService {
 	service := NewAccountTestService(
 		accountRepo,
