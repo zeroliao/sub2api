@@ -77,3 +77,23 @@ func TestParseProxyLine_AnyTLSIsMarkedAsSidecar(t *testing.T) {
 	require.Equal(t, "anytls", item.Protocol)
 	require.Equal(t, "us-node", item.Name)
 }
+
+func TestParseProxyLine_SupportedSidecarRequiresCredentials(t *testing.T) {
+	t.Parallel()
+
+	item := parseProxyLine("vless://@example.com:443?type=tcp", "")
+	require.False(t, item.Valid)
+	require.True(t, item.SidecarRequired)
+	require.Equal(t, "sidecar proxy URL is missing credentials", item.Error)
+}
+
+func TestUnsupportedSidecarProtocolCannotBeSelected(t *testing.T) {
+	t.Parallel()
+
+	item := parseProxyLine("ss://secret@example.com:443", "")
+	statuses := selectProxySubscriptionItems([]ProxyImportPreviewItem{item}, &ProxySubscriptionSource{SidecarEnabled: true}, defaultProxySubscriptionStrategy(), map[string]proxySubscriptionNodeEvaluation{
+		item.Key: {Key: item.Key, Score: 100},
+	})
+	require.Empty(t, statuses)
+	require.False(t, isSupportedSubscriptionSidecarProtocol(item.Protocol))
+}

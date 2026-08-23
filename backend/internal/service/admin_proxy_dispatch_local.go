@@ -800,7 +800,7 @@ func (s *adminServiceImpl) SyncProxySubscriptionSource(ctx context.Context, id i
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
-	rows, err := s.entClient.QueryContext(ctx, `SELECT url, COALESCE(provider, '') FROM proxy_subscription_sources WHERE id = $1 AND deleted_at IS NULL`, id)
+	rows, err := s.entClient.QueryContext(ctx, `SELECT url, COALESCE(provider, '') FROM proxy_subscription_sources WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -882,7 +882,7 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 	evaluations := s.evaluateProxySubscriptionItems(scanCtx, source, items, strategy, existingNodes)
 	selectedStatuses := selectProxySubscriptionItems(items, source, strategy, evaluations)
 	result := &ProxySubscriptionScanResult{SourceID: id, Total: preview.Total, Parsed: len(items), Strategy: strategy, ScannedAt: time.Now()}
-	sidecarIndex := 0
+	sidecarCount := 0
 	activeKeys := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if scanCtx.Err() != nil {
@@ -906,6 +906,12 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 			eval = proxySubscriptionNodeEvaluation{Key: key, Country: inferProxySubscriptionCountry(item)}
 		}
 		status := defaultString(selectedStatuses[key], "candidate")
+		if item.SidecarRequired && !isSupportedSubscriptionSidecarProtocol(item.Protocol) {
+			status = "unsupported"
+			if eval.LastError == "" {
+				eval.LastError = fmt.Sprintf("sidecar protocol %s is not supported by the configured runtime", item.Protocol)
+			}
+		}
 		if item.SidecarRequired && !source.SidecarEnabled {
 			status = "sidecar_disabled"
 		}
@@ -930,17 +936,16 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 		}
 		if item.SidecarRequired {
 			result.SidecarRequired++
-			if isSelected && source.SidecarEnabled && sidecarIndex < strategy.MaxActiveSidecarNodes {
-				port := source.PortStart + sidecarIndex
-				if port <= source.PortEnd {
-					if err := s.reserveProxySidecarEndpoint(scanCtx, source, nodeID, port); err != nil {
-						result.Errors = append(result.Errors, err.Error())
-					} else {
-						if err := s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
-							result.Errors = append(result.Errors, err.Error())
-						}
-						sidecarIndex++
-					}
+			if isSelected && source.SidecarEnabled && sidecarCount < strategy.MaxActiveSidecarNodes {
+				port, portErr := s.allocateProxySidecarPort(scanCtx, source, nodeID)
+				if portErr != nil {
+					result.Errors = append(result.Errors, portErr.Error())
+				} else if err := s.reserveProxySidecarEndpoint(scanCtx, source, nodeID, port); err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				} else if err := s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
+					result.Errors = append(result.Errors, err.Error())
+				} else {
+					sidecarCount++
 				}
 			}
 		} else {
@@ -1053,7 +1058,7 @@ SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_in
        COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
        COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at
 FROM proxy_subscription_sources
-WHERE id = $1 AND deleted_at IS NULL`, id)
+WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -1181,7 +1186,7 @@ func selectProxySubscriptionItems(items []ProxyImportPreviewItem, source *ProxyS
 	}
 	candidates := make([]candidate, 0, len(items))
 	for _, item := range items {
-		if !item.Valid || item.Duplicate {
+		if !item.Valid || item.Duplicate || (item.SidecarRequired && !isSupportedSubscriptionSidecarProtocol(item.Protocol)) {
 			continue
 		}
 		key := item.Key
@@ -1305,6 +1310,16 @@ func selectProxySubscriptionItems(items []ProxyImportPreviewItem, source *ProxyS
 	}
 	return statuses
 }
+
+func isSupportedSubscriptionSidecarProtocol(protocol string) bool {
+	switch strings.ToLower(strings.TrimSpace(protocol)) {
+	case "anytls", "vless", "hysteria2":
+		return true
+	default:
+		return false
+	}
+}
+
 func scoreProxySubscriptionItem(item ProxyImportPreviewItem, strategy ProxySubscriptionStrategy, cleanScore *int, latencyMs *int) int {
 	score := 60
 	if !item.SidecarRequired {
@@ -1505,13 +1520,106 @@ func (s *adminServiceImpl) reserveProxySidecarEndpoint(ctx context.Context, sour
 	if source == nil {
 		return nil
 	}
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxies p
+SET status = $2, quality_status = 'failed', last_checked_at = NOW(), updated_at = NOW()
+WHERE p.id = (
+  SELECT proxy_id FROM proxy_sidecar_endpoints
+  WHERE node_id = $1 AND deleted_at IS NULL LIMIT 1
+)
+  AND p.port <> $3 AND p.deleted_at IS NULL`, nodeID, StatusDisabled, port); err != nil {
+		return err
+	}
 	_, err := s.entClient.ExecContext(ctx, `
 INSERT INTO proxy_sidecar_endpoints (source_id, node_id, runtime, listen_host, listen_port, protocol, status, updated_at)
 VALUES ($1, $2, $3, $4, $5, 'socks5', 'pending', NOW())
 ON CONFLICT (node_id) WHERE deleted_at IS NULL
 DO UPDATE SET runtime = EXCLUDED.runtime, listen_host = EXCLUDED.listen_host, listen_port = EXCLUDED.listen_port,
-              status = 'pending', updated_at = NOW()`, source.ID, nodeID, defaultString(source.Runtime, "sing-box"), sidecarListenHost(), port)
+			status = 'pending', updated_at = NOW()`, source.ID, nodeID, defaultString(source.Runtime, "sing-box"), sidecarListenHost(), port)
 	return err
+}
+
+func (s *adminServiceImpl) allocateProxySidecarPort(ctx context.Context, source *ProxySubscriptionSource, nodeID int64) (int, error) {
+	if source == nil || source.PortStart <= 0 || source.PortEnd < source.PortStart {
+		return 0, errors.New("invalid sidecar port range")
+	}
+	if _, err := s.entClient.ExecContext(ctx, `SELECT pg_advisory_xact_lock(728341902)`); err != nil {
+		return 0, fmt.Errorf("lock sidecar port allocator: %w", err)
+	}
+	var existingPort sql.NullInt64
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT listen_port
+FROM proxy_sidecar_endpoints
+WHERE node_id = $1 AND deleted_at IS NULL
+
+LIMIT 1`, nodeID)
+	if err != nil {
+		return 0, fmt.Errorf("load existing sidecar port: %w", err)
+	}
+	if rows.Next() {
+		if err := rows.Scan(&existingPort); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("scan existing sidecar port: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("read existing sidecar port: %w", err)
+	}
+	_ = rows.Close()
+	if existingPort.Valid && existingPort.Int64 >= int64(source.PortStart) && existingPort.Int64 <= int64(source.PortEnd) {
+		var occupied bool
+		rows, err := s.entClient.QueryContext(ctx, `
+SELECT EXISTS (
+  SELECT 1 FROM proxy_sidecar_endpoints
+  WHERE listen_port = $1 AND deleted_at IS NULL AND node_id <> $2
+
+)`, existingPort.Int64, nodeID)
+		if err != nil {
+			return 0, fmt.Errorf("check existing sidecar port: %w", err)
+		}
+		if rows.Next() {
+			if err := rows.Scan(&occupied); err != nil {
+				_ = rows.Close()
+				return 0, fmt.Errorf("scan existing sidecar port occupancy: %w", err)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("read existing sidecar port occupancy: %w", err)
+		}
+		_ = rows.Close()
+		if !occupied {
+			return int(existingPort.Int64), nil
+		}
+	}
+	var port int
+	rows, err = s.entClient.QueryContext(ctx, `
+SELECT candidate
+FROM generate_series($1, $2) AS candidate
+WHERE NOT EXISTS (
+  SELECT 1 FROM proxy_sidecar_endpoints
+  WHERE listen_port = candidate AND deleted_at IS NULL
+)
+ORDER BY candidate
+LIMIT 1`, source.PortStart, source.PortEnd)
+	if err != nil {
+		return 0, fmt.Errorf("allocate sidecar port: %w", err)
+	}
+	if !rows.Next() {
+		_ = rows.Close()
+		return 0, fmt.Errorf("no available sidecar port in range %d-%d", source.PortStart, source.PortEnd)
+	}
+	if err := rows.Scan(&port); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("scan allocated sidecar port: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("read allocated sidecar port: %w", err)
+	}
+	_ = rows.Close()
+	return port, nil
 }
 func (s *adminServiceImpl) refreshProxySidecarEndpointReadiness(ctx context.Context, nodeID, proxyID int64, port int) error {
 	endpointStatus := "pending"
@@ -1519,11 +1627,20 @@ func (s *adminServiceImpl) refreshProxySidecarEndpointReadiness(ctx context.Cont
 	host := sidecarProbeHost()
 	lastError := fmt.Sprintf("sidecar endpoint %s:%d is not ready", host, port)
 	lastStartedAt := any(nil)
-	if isLocalTCPPortReachable(ctx, host, port) {
-		endpointStatus = "ready"
-		proxyStatus = StatusActive
-		lastError = ""
-		lastStartedAt = time.Now()
+	if s.proxyProber != nil {
+		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		exitInfo, _, probeErr := s.proxyProber.ProbeProxy(probeCtx, (&Proxy{Protocol: "socks5", Host: host, Port: port}).URL())
+		cancel()
+		if probeErr == nil && exitInfo != nil && strings.TrimSpace(exitInfo.IP) != "" {
+			endpointStatus = "ready"
+			proxyStatus = StatusActive
+			lastError = ""
+			lastStartedAt = time.Now()
+		} else if probeErr != nil {
+			lastError = fmt.Sprintf("sidecar proxy probe failed: %v", probeErr)
+		} else {
+			lastError = "sidecar proxy probe returned no exit IP"
+		}
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
 UPDATE proxy_sidecar_endpoints
@@ -2708,7 +2825,14 @@ func parseProxyLine(line, provider string) ProxyImportPreviewItem {
 			item.ProxyType = "sidecar"
 			item.SidecarRequired = true
 			item.SidecarHint = "需要通过 mihomo / sing-box / xray sidecar 转成本地 http/socks5 出口"
-			item.Valid = true
+			item.Valid = item.Host != "" && item.Port > 0
+			if isSupportedSubscriptionSidecarProtocol(scheme) && item.Username == "" {
+				item.Valid = false
+				item.Error = "sidecar proxy URL is missing credentials"
+			}
+			if !item.Valid && item.Error == "" {
+				item.Error = "invalid sidecar proxy URL"
+			}
 			item.Name = strings.TrimSpace(u.Fragment)
 			if item.Name == "" {
 				item.Name = scheme + " node"
@@ -2756,7 +2880,11 @@ func parseClashYAML(content, provider string) []ProxyImportPreviewItem {
 			item.ProxyType = "sidecar"
 			item.SidecarRequired = true
 			item.SidecarHint = "Clash/Mihomo 节点需要通过 sidecar 暴露本地 http/socks5 出口"
-			item.Valid = true
+			item.Valid = item.Host != "" && item.Port > 0
+			if isSupportedSubscriptionSidecarProtocol(typ) && item.Username == "" && item.Password == "" {
+				item.Valid = false
+				item.Error = "sidecar proxy is missing credentials"
+			}
 		}
 		items = append(items, item)
 	}
@@ -2789,7 +2917,8 @@ func parseSingBoxJSON(content, provider string) []ProxyImportPreviewItem {
 			item.ProxyType = "sidecar"
 			item.SidecarRequired = true
 			item.SidecarHint = "sing-box 非 HTTP 原生节点需要通过 sidecar 暴露本地出口"
-			item.Valid = true
+			item.Valid = false
+			item.Error = "sing-box JSON sidecar import requires a supported raw URI"
 		}
 		items = append(items, item)
 	}
