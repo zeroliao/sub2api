@@ -20,6 +20,11 @@ export interface CcSwitchImportDeeplinkInput {
   usageScript: string
 }
 
+function withV1Endpoint(baseUrl: string): string {
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '')
+  return normalizedBaseUrl.endsWith('/v1') ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`
+}
+
 export function withOpenAIV1BaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
   return /\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/v1`

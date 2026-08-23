@@ -23,6 +23,7 @@ export interface BackupRecord {
   backup_type: string;
   file_name: string;
   s3_key: string;
+  parts?: BackupPart[];
   size_bytes: number;
   triggered_by: string;
   error_message?: string;
@@ -186,8 +187,8 @@ export async function deleteBackup(id: string): Promise<void> {
   await apiClient.delete(`/admin/backups/${id}`);
 }
 
-export async function getDownloadURL(id: string): Promise<{ url: string }> {
-  const { data } = await apiClient.get<{ url: string }>(
+export async function getDownloadURL(id: string): Promise<BackupDownloadResponse> {
+  const { data } = await apiClient.get<BackupDownloadResponse>(
     `/admin/backups/${id}/download-url`,
   );
   return data;
