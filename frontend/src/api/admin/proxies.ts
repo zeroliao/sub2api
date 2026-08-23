@@ -25,6 +25,12 @@ import type {
   AdminDataImportResult
 } from '@/types'
 
+// A subscription scan can probe nodes and run reputation checks for several
+// minutes. Keep the client alive longer than the backend's default and UI
+// strategy budgets (currently up to 55 minutes), otherwise Axios reports a
+// timeout as a generic network error.
+export const PROXY_SUBSCRIPTION_SCAN_TIMEOUT_MS = 60 * 60 * 1000
+
 /**
  * List all proxies with pagination
  * @param page - Page number (default: 1)
@@ -378,7 +384,11 @@ export async function syncProxySubscription(id: number): Promise<ProxyImportPrev
 }
 
 export async function scanProxySubscription(id: number): Promise<ProxySubscriptionScanResult> {
-  const { data } = await apiClient.post<ProxySubscriptionScanResult>(`/admin/proxy-subscriptions/${id}/scan`)
+  const { data } = await apiClient.post<ProxySubscriptionScanResult>(
+    `/admin/proxy-subscriptions/${id}/scan`,
+    undefined,
+    { timeout: PROXY_SUBSCRIPTION_SCAN_TIMEOUT_MS },
+  )
   return data
 }
 
