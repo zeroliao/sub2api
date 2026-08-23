@@ -77,6 +77,7 @@ const defaultFilters = () => ({
   request_type: null,
   billing_type: null,
   billing_mode: null,
+	upstream_model_mismatch: null,
   group_id: null,
   start_date: "",
   end_date: "",

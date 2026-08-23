@@ -108,7 +108,7 @@ jobs:
 
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.26.5'
+          go version | grep -q 'go1.26.6'
 
       - name: Fetch tags with annotations
         run: |

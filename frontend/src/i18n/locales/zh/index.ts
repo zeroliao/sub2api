@@ -9,6 +9,7 @@ export default {
   ...landing,
   ...common,
   ...dashboard,
+  ...channelMonitorV2,
   ...batchImage,
   admin,
   ...misc,

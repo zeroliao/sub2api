@@ -916,6 +916,8 @@ describe("AccountUsageCell", () => {
 
   it("Grok paid plans are not mistaken for Free when weekly usage is temporarily missing", async () => {
     getUsage.mockResolvedValue({
+      grok_free_token_limit: 500_000,
+      subscription_tier: 'free',
       grok_billing: {
         period_type: "weekly",
         usage_percent: null,
@@ -963,6 +965,7 @@ describe("AccountUsageCell", () => {
 
   it("Grok custom paid monthly limits override stale Free entitlement", async () => {
     getUsage.mockResolvedValue({
+      subscription_tier: 'supergrok_lite',
       grok_billing: {
         period_type: "weekly",
         usage_percent: null,

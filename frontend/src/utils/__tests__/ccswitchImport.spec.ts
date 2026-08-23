@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  GROK_CC_SWITCH_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink,
   withOpenAIV1BaseUrl
@@ -14,6 +15,10 @@ function paramsFromDeeplink(deeplink: string): URLSearchParams {
 describe('ccswitchImport utils', () => {
   it('defaults OpenAI CC Switch imports to the current Codex model', () => {
     expect(OPENAI_CC_SWITCH_CODEX_MODEL).toBe('gpt-5.5')
+  })
+
+  it('defaults Grok Build imports to the current Grok model', () => {
+    expect(GROK_CC_SWITCH_MODEL).toBe('grok-4.5')
   })
 
   const baseInput = {

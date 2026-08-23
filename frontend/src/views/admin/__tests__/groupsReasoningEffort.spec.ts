@@ -6,6 +6,7 @@ import {
   reasoningEffortMappingsToAPI,
   reasoningEffortMappingsToRows,
   reasoningEffortOptionsForPlatform,
+  supportsReasoningEffortPolicyPlatform,
   validateReasoningEffortMappings,
 } from "../groupsReasoningEffort";
 
@@ -21,6 +22,7 @@ describe("groupsReasoningEffort", () => {
       "grok",
     ] as const) {
       expect(reasoningEffortOptionsForPlatform(platform)).toEqual([]);
+      expect(supportsReasoningEffortPolicyPlatform(platform)).toBe(false);
     }
   });
 
@@ -41,6 +43,9 @@ describe("groupsReasoningEffort", () => {
 
   it("clears values unsupported by OpenAI or used on another platform", () => {
     expect(normalizeReasoningEffortForPlatform("openai", " MAX ")).toBe("max");
+    expect(normalizeReasoningEffortForPlatform("composite", " MAX ")).toBe(
+      "max",
+    );
     expect(normalizeReasoningEffortForPlatform("grok", "max")).toBe("");
     expect(normalizeReasoningEffortForPlatform("openai", "none")).toBe("");
   });

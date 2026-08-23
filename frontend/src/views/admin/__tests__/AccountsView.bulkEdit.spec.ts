@@ -31,6 +31,7 @@ vi.mock("@/api/admin", () => ({
       delete: vi.fn(),
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
+      probeUpstreamBilling,
       probeUpstreamBillingBatch,
       toggleSchedulable: vi.fn(),
     },
@@ -75,6 +76,19 @@ const DataTableStub = {
       <div v-for="row in data" :key="row.id">
         <div data-test="select-row"><slot name="cell-select" :row="row" /></div>
         <slot name="cell-created_at" :value="row.created_at" :row="row" />
+        <div data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></div>
+      </div>
+    </div>
+  `
+}
+
+const ProbeDataTableStub = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.id">
+        <div data-test="account-rate"><slot name="cell-rate_multiplier" :row="row" /></div>
+        <slot name="cell-upstream_billing_rate" :row="row" />
       </div>
     </div>
   `,
@@ -461,7 +475,7 @@ describe("admin AccountsView bulk edit scope", () => {
       });
     probeUpstreamBillingBatch.mockResolvedValue([
       {
-        account_id: 7,
+        account_id: 11,
         snapshot: {
           status: "ok",
           data: { effective_rate_multiplier: 0.5 },
