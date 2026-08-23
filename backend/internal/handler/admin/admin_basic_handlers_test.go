@@ -57,6 +57,7 @@ func setupAdminRouter() (*gin.Engine, *stubAdminService) {
 	router.POST("/api/v1/admin/proxies/:id/quality-check", proxyHandler.CheckQuality)
 	router.GET("/api/v1/admin/proxies/:id/stats", proxyHandler.GetStats)
 	router.GET("/api/v1/admin/proxies/:id/accounts", proxyHandler.GetProxyAccounts)
+	router.POST("/api/v1/admin/proxy-subscriptions/:id/scan", proxyHandler.ScanProxySubscription)
 
 	router.GET("/api/v1/admin/redeem-codes", redeemHandler.List)
 	router.GET("/api/v1/admin/redeem-codes/:id", redeemHandler.GetByID)
@@ -328,6 +329,11 @@ func TestProxyHandlerEndpoints(t *testing.T) {
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/proxies/4/accounts", nil)
 	router.ServeHTTP(rec, req)
 	require.Equal(t, http.StatusOK, rec.Code)
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/admin/proxy-subscriptions/4/scan", nil)
+	router.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusAccepted, rec.Code)
 }
 
 func TestRedeemHandlerEndpoints(t *testing.T) {

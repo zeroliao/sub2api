@@ -145,6 +145,7 @@ type AdminService interface {
 	UpdateProxySubscriptionSource(ctx context.Context, id int64, input ProxySubscriptionSourceInput) (*ProxySubscriptionSource, error)
 	DeleteProxySubscriptionSource(ctx context.Context, id int64) error
 	SyncProxySubscriptionSource(ctx context.Context, id int64) (*ProxyImportPreview, error)
+	StartProxySubscriptionScan(ctx context.Context, id int64) (*ProxySubscriptionScanStatus, error)
 	ScanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error)
 	GetProxySubscriptionScanStatus(ctx context.Context) (*ProxySubscriptionScanStatus, error)
 	ListProxySubscriptionNodes(ctx context.Context, sourceID int64) ([]ProxySubscriptionNode, error)

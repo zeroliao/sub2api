@@ -688,6 +688,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
+import { PROXY_SUBSCRIPTION_SCAN_TIMEOUT_MS } from '@/api/admin/proxies'
 import { useAppStore } from '@/stores/app'
 import type {
   AccountProxyBinding,
@@ -1314,6 +1315,21 @@ async function syncScanStatus() {
   }
 }
 
+async function waitForScanCompletion(id: number) {
+  const deadline = Date.now() + PROXY_SUBSCRIPTION_SCAN_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const status = await adminAPI.proxies.getProxySubscriptionScanStatus()
+    serverScanStatus.value = status
+    if (!status.active || status.source_id !== id) {
+      replaceScanningSource(status.active && status.source_id ? status.source_id : null, status.started_at)
+      return
+    }
+    replaceScanningSource(status.source_id, status.started_at)
+    await new Promise(resolve => setTimeout(resolve, 3000))
+  }
+  throw new Error('扫描任务仍在运行，请稍后刷新查看结果')
+}
+
 function startScanStatusPolling() {
   if (scanStatusPoller) return
   scanStatusPoller = setInterval(() => {
@@ -1580,15 +1596,21 @@ async function scanSubscription(id: number) {
   }
   markScanning(id, true)
   try {
-    scanResult.value = await adminAPI.proxies.scanProxySubscription(id)
+    const accepted = await adminAPI.proxies.scanProxySubscription(id)
+    serverScanStatus.value = accepted
+    replaceScanningSource(accepted.source_id || id, accepted.started_at)
+    await waitForScanCompletion(id)
     await loadSubscriptions()
+    const refreshed = subscriptions.value.find(source => source.id === id)
+    if (refreshed?.last_scan_result) {
+      scanResult.value = refreshed.last_scan_result as unknown as ProxySubscriptionScanResult
+    }
     if (selectedNodeSource.value?.id === id) {
-      const refreshed = subscriptions.value.find(source => source.id === id)
       if (refreshed) selectedNodeSource.value = refreshed
       const nodes = await adminAPI.proxies.listProxySubscriptionNodes(id)
       subscriptionNodes.value = toArray(nodes)
     }
-    appStore.showSuccess(`扫描完成，已选中 ${scanResult.value.selected} 个节点`)
+    appStore.showSuccess(`扫描完成，已选中 ${readScanNumber(refreshed?.last_scan_result, 'selected') ?? 0} 个节点`)
   } catch (error: any) {
     if (isBusyScanError(error)) {
       await syncScanStatus()

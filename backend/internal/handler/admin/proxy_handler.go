@@ -546,12 +546,12 @@ func (h *ProxyHandler) ScanProxySubscription(c *gin.Context) {
 		response.BadRequest(c, "Invalid subscription ID")
 		return
 	}
-	result, err := h.adminService.ScanProxySubscriptionSource(c.Request.Context(), id)
+	result, err := h.adminService.StartProxySubscriptionScan(c.Request.Context(), id)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	response.Success(c, result)
+	response.Accepted(c, result)
 }
 
 func (h *ProxyHandler) GetProxySubscriptionScanStatus(c *gin.Context) {

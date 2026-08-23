@@ -23,6 +23,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"gopkg.in/yaml.v3"
 )
@@ -829,6 +830,30 @@ func (s *adminServiceImpl) ScanProxySubscriptionSource(ctx context.Context, id i
 	if err := s.tryStartProxySubscriptionScan(id); err != nil {
 		return nil, err
 	}
+	return s.scanProxySubscriptionSource(ctx, id)
+}
+
+func (s *adminServiceImpl) StartProxySubscriptionScan(ctx context.Context, id int64) (*ProxySubscriptionScanStatus, error) {
+	if s == nil || s.entClient == nil {
+		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
+	}
+	source, err := s.getProxySubscriptionSourceForScan(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.tryStartProxySubscriptionScan(id); err != nil {
+		return nil, err
+	}
+	status := s.proxySubscriptionScanStatus(source)
+	go func() {
+		if _, scanErr := s.scanProxySubscriptionSource(context.Background(), id); scanErr != nil {
+			logger.LegacyPrintf("service.proxy_subscription_scan", "[ProxySubscriptionScan] source=%d failed: %v", id, scanErr)
+		}
+	}()
+	return status, nil
+}
+
+func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error) {
 	defer s.finishProxySubscriptionScan()
 	source, err := s.getProxySubscriptionSourceForScan(ctx, id)
 	if err != nil {
@@ -939,6 +964,26 @@ func (s *adminServiceImpl) ScanProxySubscriptionSource(ctx context.Context, id i
 	}
 	return result, nil
 }
+
+func (s *adminServiceImpl) proxySubscriptionScanStatus(source *ProxySubscriptionSource) *ProxySubscriptionScanStatus {
+	status := &ProxySubscriptionScanStatus{Active: true}
+	if source != nil {
+		status.SourceID = source.ID
+		status.SourceName = source.Name
+		strategy := normalizeProxySubscriptionStrategy(source.Strategy)
+		status.ScanBudgetMinutes = strategy.ScanBudgetMinutes
+		status.ScanBudgetMaxMinutes = strategy.ScanBudgetMaxMinutes
+	}
+	s.scanStateMu.Lock()
+	startedAt := s.scanStartedAt
+	s.scanStateMu.Unlock()
+	if !startedAt.IsZero() {
+		status.StartedAt = &startedAt
+		status.ElapsedSeconds = int(time.Since(startedAt).Seconds())
+	}
+	return status
+}
+
 func (s *adminServiceImpl) GetProxySubscriptionScanStatus(ctx context.Context) (*ProxySubscriptionScanStatus, error) {
 	status := &ProxySubscriptionScanStatus{}
 	if s == nil {
