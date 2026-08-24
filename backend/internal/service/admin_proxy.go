@@ -101,6 +101,9 @@ func (s *adminServiceImpl) GetProxiesByIDs(ctx context.Context, ids []int64) ([]
 }
 
 func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyInput) (*Proxy, error) {
+	if input == nil {
+		return nil, infraerrors.BadRequest("PROXY_INPUT_REQUIRED", "proxy input is required")
+	}
 	// 规范化 fallback_mode
 	mode := input.FallbackMode
 	if mode == "" {
@@ -112,6 +115,16 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	}
 	if input.ExpiryWarnDays < 0 {
 		return nil, infraerrors.BadRequest("PROXY_WARN_DAYS_INVALID", "expiry_warn_days must be >= 0")
+	}
+	if restored, err := s.restoreDeletedProxy(ctx, input, mode); err != nil {
+		return nil, err
+	} else if restored != nil {
+		applyProxyInputMetadata(restored, input)
+		if err := s.saveProxyMetadata(ctx, restored.ID, restored); err != nil {
+			return nil, err
+		}
+		go s.probeProxyLatency(context.Background(), restored)
+		return restored, nil
 	}
 
 	proxy := &Proxy{

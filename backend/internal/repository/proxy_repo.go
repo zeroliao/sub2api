@@ -485,7 +485,9 @@ func (r *proxyRepository) ListActive(ctx context.Context) ([]service.Proxy, erro
 // ExistsByHostPortAuth checks if a proxy with the same host, port, username, and password exists
 func (r *proxyRepository) ExistsByHostPortAuth(ctx context.Context, host string, port int, username, password string) (bool, error) {
 	q := r.client.Proxy.Query().
-		Where(proxy.HostEQ(host), proxy.PortEQ(port))
+		Where(proxy.HostEQ(host), proxy.PortEQ(port), func(s *entsql.Selector) {
+			s.Where(entsql.IsNull(s.C(proxy.FieldDeletedAt)))
+		})
 
 	if username == "" {
 		q = q.Where(proxy.Or(proxy.UsernameIsNil(), proxy.UsernameEQ("")))

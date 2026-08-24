@@ -2178,6 +2178,67 @@ LIMIT 1`, host, port, username, password)
 	}
 	return nil, false, nil
 }
+
+// restoreDeletedProxy reactivates the newest soft-deleted proxy with the same
+// endpoint and credentials. The caller has already validated the create input.
+func (s *adminServiceImpl) restoreDeletedProxy(ctx context.Context, input *CreateProxyInput, fallbackMode string) (*Proxy, error) {
+	if s == nil || s.entClient == nil || input == nil {
+		return nil, nil
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+UPDATE proxies
+SET name = $1,
+    protocol = $2,
+    host = $3,
+    port = $4,
+    username = NULLIF($5, ''),
+    password = NULLIF($6, ''),
+    status = $7,
+    expires_at = $8,
+    fallback_mode = $9,
+    backup_proxy_id = $10,
+    expiry_warn_days = $11,
+    last_checked_at = NULL,
+    failure_count = 0,
+    deleted_at = NULL,
+    updated_at = NOW()
+WHERE id = (
+    SELECT id
+    FROM proxies
+    WHERE host = $3
+      AND port = $4
+      AND COALESCE(username, '') = $5
+      AND COALESCE(password, '') = $6
+      AND deleted_at IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1
+          FROM proxies active_proxy
+          WHERE active_proxy.host = $3
+            AND active_proxy.port = $4
+            AND COALESCE(active_proxy.username, '') = $5
+            AND COALESCE(active_proxy.password, '') = $6
+            AND active_proxy.deleted_at IS NULL
+      )
+    ORDER BY id DESC
+    LIMIT 1
+)
+	RETURNING id`, input.Name, input.Protocol, input.Host, input.Port,
+		strings.TrimSpace(input.Username), strings.TrimSpace(input.Password), StatusActive,
+		input.ExpiresAt, fallbackMode, input.BackupProxyID, input.ExpiryWarnDays)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		return nil, err
+	}
+	return s.proxyRepo.GetByID(ctx, id)
+}
+
 func applyProxyInputMetadata(proxy *Proxy, input *CreateProxyInput) {
 	if proxy == nil || input == nil {
 		return
