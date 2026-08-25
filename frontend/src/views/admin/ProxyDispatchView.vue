@@ -690,6 +690,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { adminAPI } from '@/api/admin'
 import { PROXY_SUBSCRIPTION_SCAN_TIMEOUT_MS } from '@/api/admin/proxies'
 import { useAppStore } from '@/stores/app'
+import { proxySubscriptionScanErrorCount } from '@/utils/proxySubscriptionScan'
 import type {
   AccountProxyBinding,
   ProxyDispatchSettings,
@@ -1249,7 +1250,7 @@ function formatScanResultSummary(result: Record<string, unknown> | undefined) {
   const parsed = readScanNumber(result, 'parsed')
   const saved = readScanNumber(result, 'saved')
   const selected = readScanNumber(result, 'selected')
-  const errors = readScanNumber(result, 'errors')
+  const errors = proxySubscriptionScanErrorCount(result)
   return `解析 ${parsed ?? '-'} / 入库 ${saved ?? '-'} / 选中 ${selected ?? '-'} / 错误 ${errors ?? 0}`
 }
 

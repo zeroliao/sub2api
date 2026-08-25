@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,6 +125,10 @@ func TestSidecarProbeHostCanOverrideProxyHost(t *testing.T) {
 
 	require.Equal(t, "sidecar-proxy", sidecarProxyHost())
 	require.Equal(t, "127.0.0.1", sidecarProbeHost())
+}
+
+func TestAllocateProxySidecarPortSQLUsesTypedBounds(t *testing.T) {
+	require.Contains(t, strings.ReplaceAll(allocateProxySidecarPortSQL, "\n", " "), "generate_series($1::int, $2::int)")
 }
 
 func TestResolveProxySubscriptionAPIKeyUsesGlobalSetting(t *testing.T) {

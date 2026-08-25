@@ -246,6 +246,17 @@ type ProxySubscriptionScanStatus struct {
 	ScanBudgetMinutes    int        `json:"scan_budget_minutes,omitempty"`
 	ScanBudgetMaxMinutes int        `json:"scan_budget_max_minutes,omitempty"`
 }
+
+const allocateProxySidecarPortSQL = `
+SELECT candidate
+FROM generate_series($1::int, $2::int) AS candidate
+WHERE NOT EXISTS (
+  SELECT 1 FROM proxy_sidecar_endpoints
+  WHERE listen_port = candidate AND deleted_at IS NULL
+)
+ORDER BY candidate
+LIMIT 1`
+
 type proxySubscriptionNodeEvaluation struct {
 	Key                 string
 	Country             string
@@ -1594,15 +1605,7 @@ SELECT EXISTS (
 		}
 	}
 	var port int
-	rows, err = s.entClient.QueryContext(ctx, `
-SELECT candidate
-FROM generate_series($1, $2) AS candidate
-WHERE NOT EXISTS (
-  SELECT 1 FROM proxy_sidecar_endpoints
-  WHERE listen_port = candidate AND deleted_at IS NULL
-)
-ORDER BY candidate
-LIMIT 1`, source.PortStart, source.PortEnd)
+	rows, err = s.entClient.QueryContext(ctx, allocateProxySidecarPortSQL, source.PortStart, source.PortEnd)
 	if err != nil {
 		return 0, fmt.Errorf("allocate sidecar port: %w", err)
 	}
