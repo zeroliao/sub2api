@@ -97,3 +97,18 @@ func TestUnsupportedSidecarProtocolCannotBeSelected(t *testing.T) {
 	require.Empty(t, statuses)
 	require.False(t, isSupportedSubscriptionSidecarProtocol(item.Protocol))
 }
+
+func TestConnectivityFailedNodeCannotBeSelected(t *testing.T) {
+	t.Parallel()
+	item := parseProxyLine("http://proxy.example.com:8080", "")
+	statuses := selectProxySubscriptionItems([]ProxyImportPreviewItem{item}, &ProxySubscriptionSource{SidecarEnabled: true}, defaultProxySubscriptionStrategy(), map[string]proxySubscriptionNodeEvaluation{
+		item.Key: {Key: item.Key, Score: 100, ConnectivityFailed: true},
+	})
+	require.Empty(t, statuses)
+}
+
+func TestProbeProxySubscriptionConnectivityEmptyTargetAllows(t *testing.T) {
+	t.Parallel()
+	item := parseProxyLine("http://proxy.example.com:8080", "")
+	require.NoError(t, probeProxySubscriptionConnectivity(context.Background(), item, &ProxySubscriptionSource{}, defaultProxySubscriptionStrategy()))
+}

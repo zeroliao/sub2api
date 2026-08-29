@@ -127,6 +127,7 @@ type ProxySubscriptionSource struct {
 	ID                         int64                     `json:"id"`
 	Name                       string                    `json:"name"`
 	URL                        string                    `json:"url"`
+	ConnectivityURL            string                    `json:"connectivity_url"`
 	SourceType                 string                    `json:"source_type"`
 	Provider                   string                    `json:"provider,omitempty"`
 	SyncEnabled                bool                      `json:"sync_enabled"`
@@ -152,6 +153,7 @@ type ProxySubscriptionSource struct {
 type ProxySubscriptionSourceInput struct {
 	Name                       string                    `json:"name"`
 	URL                        string                    `json:"url"`
+	ConnectivityURL            string                    `json:"connectivity_url"`
 	SourceType                 string                    `json:"source_type"`
 	Provider                   string                    `json:"provider"`
 	SyncEnabled                *bool                     `json:"sync_enabled"`
@@ -272,6 +274,7 @@ type proxySubscriptionNodeEvaluation struct {
 	TimeoutCount        int
 	SleepUntil          *time.Time
 	TimedOut            bool
+	ConnectivityFailed  bool
 	Score               int
 	LastError           string
 }
@@ -690,7 +693,7 @@ func (s *adminServiceImpl) ListProxySubscriptionSources(ctx context.Context) ([]
 	}
 	rows, err := s.entClient.QueryContext(ctx, `
 SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-       COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+       COALESCE(connectivity_url, ''), COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
        scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
        COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
        COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at
@@ -707,7 +710,7 @@ ORDER BY id DESC`)
 	for rows.Next() {
 		var item ProxySubscriptionSource
 		var strategyRaw, scanResultRaw string
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.ConnectivityURL, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
@@ -727,17 +730,17 @@ func (s *adminServiceImpl) CreateProxySubscriptionSource(ctx context.Context, in
 	}
 	rows, err := s.entClient.QueryContext(ctx, `
 INSERT INTO proxy_subscription_sources (
-  name, url, source_type, provider, sync_enabled, sync_interval_minutes,
+  name, url, source_type, provider, sync_enabled, sync_interval_minutes, connectivity_url,
   strategy_json, sidecar_enabled, runtime, port_start, port_end, scan_enabled,
   scan_interval_minutes, health_check_interval_minutes, reputation_provider,
   reputation_api_key_ref, status, created_at, updated_at
 )
-VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, NULLIF($16, ''), $17, NOW(), NOW())
+VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, NULLIF($7, ''), $8::jsonb, $9, $10, $11, $12, $13, $14, $15, $16, NULLIF($17, ''), $18, NOW(), NOW())
 RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-          COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+          COALESCE(connectivity_url, ''), COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
           scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
           COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
-          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled, input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
+          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.ConnectivityURL, string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled, input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -747,7 +750,7 @@ RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync
 	if rows.Next() {
 		var item ProxySubscriptionSource
 		var strategyRaw, scanResultRaw string
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.ConnectivityURL, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
@@ -768,17 +771,17 @@ func (s *adminServiceImpl) UpdateProxySubscriptionSource(ctx context.Context, id
 	rows, err := s.entClient.QueryContext(ctx, `
 UPDATE proxy_subscription_sources
 SET name = $2, url = $3, source_type = $4, provider = NULLIF($5, ''),
-    sync_enabled = $6, sync_interval_minutes = $7, strategy_json = $8::jsonb,
-    sidecar_enabled = $9, runtime = $10, port_start = $11, port_end = $12,
-    scan_enabled = $13, scan_interval_minutes = $14, health_check_interval_minutes = $15,
-    reputation_provider = $16, reputation_api_key_ref = NULLIF($17, ''), status = $18,
+    sync_enabled = $6, sync_interval_minutes = $7, connectivity_url = NULLIF($8, ''), strategy_json = $9::jsonb,
+    sidecar_enabled = $10, runtime = $11, port_start = $12, port_end = $13,
+    scan_enabled = $14, scan_interval_minutes = $15, health_check_interval_minutes = $16,
+    reputation_provider = $17, reputation_api_key_ref = NULLIF($18, ''), status = $19,
     updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL
 RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-          COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+          COALESCE(connectivity_url, ''), COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
           scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
           COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
-          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`, id, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled, input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
+          COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at`, id, input.Name, input.URL, input.SourceType, input.Provider, *input.SyncEnabled, input.SyncIntervalMinutes, input.ConnectivityURL, string(strategyRaw), *input.SidecarEnabled, input.Runtime, input.PortStart, input.PortEnd, *input.ScanEnabled, input.ScanIntervalMinutes, input.HealthCheckIntervalMinutes, input.ReputationProvider, input.ReputationAPIKeyRef, input.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -788,7 +791,7 @@ RETURNING id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync
 	if rows.Next() {
 		var item ProxySubscriptionSource
 		var strategyRaw, scanResultRaw string
-		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.ConnectivityURL, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
 		item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
@@ -1064,7 +1067,7 @@ ORDER BY selected DESC, score DESC, id ASC`, sourceID)
 func (s *adminServiceImpl) getProxySubscriptionSourceForScan(ctx context.Context, id int64) (*ProxySubscriptionSource, error) {
 	rows, err := s.entClient.QueryContext(ctx, `
 SELECT id, name, url, source_type, COALESCE(provider, ''), sync_enabled, sync_interval_minutes,
-       COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
+       COALESCE(connectivity_url, ''), COALESCE(strategy_json::text, '{}'), sidecar_enabled, runtime, port_start, port_end,
        scan_enabled, scan_interval_minutes, health_check_interval_minutes, reputation_provider,
        COALESCE(reputation_api_key_ref, ''), last_synced_at, last_scan_at,
        COALESCE(last_scan_result::text, '{}'), COALESCE(last_error, ''), status, created_at, updated_at
@@ -1081,7 +1084,7 @@ WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, id)
 	}
 	var item ProxySubscriptionSource
 	var strategyRaw, scanResultRaw string
-	if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := rows.Scan(&item.ID, &item.Name, &item.URL, &item.SourceType, &item.Provider, &item.SyncEnabled, &item.SyncIntervalMinutes, &item.ConnectivityURL, &strategyRaw, &item.SidecarEnabled, &item.Runtime, &item.PortStart, &item.PortEnd, &item.ScanEnabled, &item.ScanIntervalMinutes, &item.HealthCheckIntervalMinutes, &item.ReputationProvider, &item.ReputationAPIKeyRef, &item.LastSyncedAt, &item.LastScanAt, &scanResultRaw, &item.LastError, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		return nil, err
 	}
 	item.Strategy = parseProxySubscriptionStrategy(strategyRaw)
@@ -1158,6 +1161,12 @@ func (s *adminServiceImpl) evaluateProxySubscriptionItems(ctx context.Context, s
 			eval.TimeoutCount = 0
 			eval.SleepUntil = nil
 		}
+		if connectivityErr := probeProxySubscriptionConnectivity(ctx, item, source, strategy); connectivityErr != nil {
+			eval.ConnectivityFailed = true
+			if eval.LastError == "" {
+				eval.LastError = connectivityErr.Error()
+			}
+		}
 		if strategy.TimeoutSleepAfter > 0 && eval.TimeoutCount >= strategy.TimeoutSleepAfter {
 			sleepUntil := time.Now().Add(time.Duration(strategy.SleepMinutes) * time.Minute)
 			eval.SleepUntil = &sleepUntil
@@ -1207,6 +1216,9 @@ func selectProxySubscriptionItems(items []ProxyImportPreviewItem, source *ProxyS
 		eval, ok := evaluations[key]
 		if !ok {
 			eval = proxySubscriptionNodeEvaluation{Key: key, Country: inferProxySubscriptionCountry(item), Score: scoreProxySubscriptionItem(item, strategy, nil, nil)}
+		}
+		if eval.ConnectivityFailed {
+			continue
 		}
 		if source != nil && item.SidecarRequired && !source.SidecarEnabled {
 			continue
@@ -1526,6 +1538,44 @@ func (s *adminServiceImpl) measureProxySubscriptionNodeLatency(ctx context.Conte
 	latency := int(time.Since(start).Milliseconds())
 	_ = conn.Close()
 	return &latency, false, nil
+}
+
+func probeProxySubscriptionConnectivity(ctx context.Context, item ProxyImportPreviewItem, source *ProxySubscriptionSource, strategy ProxySubscriptionStrategy) error {
+	if source == nil || !item.Valid || strings.TrimSpace(source.ConnectivityURL) == "" || item.SidecarRequired {
+		return nil
+	}
+	parsedTarget, err := url.ParseRequestURI(strings.TrimSpace(source.ConnectivityURL))
+	if err != nil || parsedTarget.Scheme == "" || parsedTarget.Host == "" {
+		return fmt.Errorf("connectivity target URL is invalid")
+	}
+	proxyParsed, err := url.Parse(fmt.Sprintf("%s://%s", strings.ToLower(strings.TrimSpace(item.Protocol)), net.JoinHostPort(item.Host, strconv.Itoa(item.Port))))
+	if err != nil {
+		return fmt.Errorf("connectivity proxy URL is invalid: %w", err)
+	}
+	if item.Username != "" {
+		proxyParsed.User = url.UserPassword(item.Username, item.Password)
+	}
+	timeout := 5 * time.Second
+	if strategy.MaxLatencyMs > 0 && time.Duration(strategy.MaxLatencyMs)*time.Millisecond < timeout {
+		timeout = time.Duration(strategy.MaxLatencyMs) * time.Millisecond
+		if timeout < 800*time.Millisecond {
+			timeout = 800 * time.Millisecond
+		}
+	}
+	client, err := httpclient.GetClient(httpclient.Options{ProxyURL: proxyParsed.String(), Timeout: timeout, ResponseHeaderTimeout: timeout})
+	if err != nil {
+		return fmt.Errorf("connectivity probe setup failed: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedTarget.String(), nil)
+	if err != nil {
+		return fmt.Errorf("connectivity target URL is invalid: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("connectivity probe failed: %w", err)
+	}
+	_ = resp.Body.Close()
+	return nil
 }
 func (s *adminServiceImpl) reserveProxySidecarEndpoint(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, port int) error {
 	if source == nil {
@@ -3073,6 +3123,7 @@ func decodeMaybeBase64Subscription(content string) string {
 func normalizeProxySubscriptionInput(input ProxySubscriptionSourceInput) ProxySubscriptionSourceInput {
 	input.Name = strings.TrimSpace(input.Name)
 	input.URL = strings.TrimSpace(input.URL)
+	input.ConnectivityURL = strings.TrimSpace(input.ConnectivityURL)
 	input.SourceType = defaultString(input.SourceType, "clash")
 	input.Provider = strings.TrimSpace(input.Provider)
 	input.Status = defaultString(input.Status, StatusActive)

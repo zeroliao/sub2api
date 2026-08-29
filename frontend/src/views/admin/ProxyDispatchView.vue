@@ -295,6 +295,9 @@
         <div class="grid gap-3 md:grid-cols-4">
           <input v-model="subscriptionForm.name" class="input" placeholder="名称" />
           <input v-model="subscriptionForm.url" class="input md:col-span-2" placeholder="订阅 URL" />
+          <label class="text-sm text-gray-700 dark:text-gray-200 md:col-span-2">连通性目标 URL
+            <input v-model="subscriptionForm.connectivity_url" class="input mt-1 w-full" placeholder="默认 https://api.openai.com；留空放行" />
+          </label>
           <select v-model="subscriptionForm.status" class="input">
             <option value="active">active</option>
             <option value="disabled">disabled</option>
@@ -748,6 +751,7 @@ function createSubscriptionForm() {
   return {
     name: '',
     url: '',
+    connectivity_url: 'https://api.openai.com',
     source_type: 'clash',
     sync_enabled: true,
     sync_interval_minutes: 1440,
@@ -976,6 +980,7 @@ function editSubscription(source: ProxySubscriptionSource) {
   Object.assign(subscriptionForm, {
     name: source.name,
     url: source.url,
+    connectivity_url: source.connectivity_url ?? 'https://api.openai.com',
     source_type: source.source_type,
     provider: source.provider,
     sync_enabled: source.sync_enabled,
@@ -1021,6 +1026,7 @@ function buildSubscriptionUpdatePayload(source: ProxySubscriptionSource, strateg
   return {
     name: source.name,
     url: source.url,
+    connectivity_url: source.connectivity_url || '',
     source_type: source.source_type,
     provider: source.provider,
     sync_enabled: source.sync_enabled,
