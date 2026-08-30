@@ -15,10 +15,10 @@ import (
 func TestProxyRepositoryExistsByHostPortAuthOnlyChecksActiveRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	repo := newProxyRepositoryWithSQL(client, db)
 	mock.ExpectQuery(`(?s)SELECT COUNT\("proxies"\."id"\).*deleted_at.*IS NULL`).
 		WithArgs("198.51.100.10", 8080, "user", "pass").

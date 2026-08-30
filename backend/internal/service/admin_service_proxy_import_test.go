@@ -67,6 +67,69 @@ func TestFetchProxySubscription_RejectsHTMLResponse(t *testing.T) {
 	require.Contains(t, infraerrors.Message(err), "is HTML, not proxy configuration")
 }
 
+func TestFetchProxySubscriptionFollowsSameOriginDownloadLink(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("flag") == "clash" {
+			w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+			_, _ = w.Write([]byte("proxies:\n  - name: node\n    type: http\n    server: 198.51.100.10\n    port: 8080\n"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><a href="/sub/key?flag=clash">Clash</a><a href="https://example.com/?flag=v2">v2</a></body></html>`))
+	}))
+	defer server.Close()
+
+	body, err := fetchProxySubscription(context.Background(), server.URL+"/sub/key")
+	require.NoError(t, err)
+	require.Contains(t, body, "proxies:")
+	require.Contains(t, body, "198.51.100.10")
+}
+
+func TestFetchProxySubscriptionDoesNotFollowExternalDownloadLink(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<html><body><a href="https://example.com/sub?flag=clash">download</a></body></html>`))
+	}))
+	defer server.Close()
+
+	_, err := fetchProxySubscription(context.Background(), server.URL+"/sub/key")
+	require.Error(t, err)
+	require.True(t, infraerrors.IsBadRequest(err))
+	require.Contains(t, infraerrors.Message(err), "is HTML, not proxy configuration")
+}
+
+func TestSameProxySubscriptionOriginUsesEffectivePort(t *testing.T) {
+	base, err := url.Parse("https://example.com/subscription")
+	require.NoError(t, err)
+	defaultPort, err := url.Parse("https://example.com:443/download")
+	require.NoError(t, err)
+	otherPort, err := url.Parse("https://example.com:8443/download")
+	require.NoError(t, err)
+
+	require.True(t, sameProxySubscriptionOrigin(base, defaultPort))
+	require.False(t, sameProxySubscriptionOrigin(base, otherPort))
+}
+
+func TestFetchProxySubscriptionRejectsExternalRedirect(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "https://example.com/subscription")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer server.Close()
+
+	_, err := fetchProxySubscription(context.Background(), server.URL+"/sub/key")
+	require.Error(t, err)
+	require.True(t, infraerrors.IsBadRequest(err))
+	require.Contains(t, infraerrors.Message(err), "failed to fetch subscription URL from")
+	require.Contains(t, infraerrors.Message(err), "subscription redirect changed origin")
+}
+
 func TestParseProxyImportItems_ParsesClashYAML(t *testing.T) {
 	t.Parallel()
 
@@ -90,13 +153,69 @@ func TestParseProxyImportItems_ParsesClashYAML(t *testing.T) {
 	require.Equal(t, "ss", items[0].Protocol)
 	require.Equal(t, "198.51.100.10", items[0].Host)
 	require.Equal(t, 443, items[0].Port)
+	require.NotEmpty(t, items[0].Raw)
 	require.True(t, items[0].Valid)
 	require.True(t, items[0].SidecarRequired)
 	require.Equal(t, "http", items[1].Protocol)
 	require.Equal(t, "198.51.100.20", items[1].Host)
 	require.Equal(t, 8080, items[1].Port)
+	require.Equal(t, "http://user:pass@198.51.100.20:8080#http-node", items[1].Raw)
 	require.True(t, items[1].Valid)
 	require.False(t, items[1].SidecarRequired)
+}
+
+func TestParseClashYAML_PreservesSidecarCredentialsAndTransport(t *testing.T) {
+	t.Parallel()
+
+	items := parseProxyImportItems(`proxies:
+  - name: de-vless
+    type: vless
+    server: edge.example.com
+    port: 443
+    uuid: 11111111-1111-4111-8111-111111111111
+    tls: true
+    servername: cdn.example.com
+    client-fingerprint: chrome
+    network: ws
+    ws-opts:
+      path: /gateway
+      headers:
+        Host: cdn.example.com
+`, "provider")
+
+	require.Len(t, items, 1)
+	item := items[0]
+	require.True(t, item.Valid)
+	require.Equal(t, "11111111-1111-4111-8111-111111111111", item.Username)
+	require.NotEmpty(t, item.Raw)
+	require.Contains(t, item.Raw, "vless://11111111-1111-4111-8111-111111111111@edge.example.com:443")
+	require.Contains(t, item.Raw, "sni=cdn.example.com")
+	require.Contains(t, item.Raw, "type=ws")
+	require.Contains(t, item.Raw, "path=%2Fgateway")
+	require.Contains(t, item.Raw, "host=cdn.example.com")
+}
+
+func TestParseClashYAML_RejectsExpiredPlaceholderNodes(t *testing.T) {
+	t.Parallel()
+
+	items := parseProxyImportItems(`proxies:
+  - name: "订阅已失效,请重新获取"
+    type: ss
+    server: 0.0.0.0
+    port: 1
+    password: 123456
+  - name: "每日更新"
+    type: ss
+    server: 0.0.0.0
+    port: 2
+    password: 123456
+`, "provider")
+
+	require.Len(t, items, 2)
+	for _, item := range items {
+		require.False(t, item.Valid)
+		require.Equal(t, "subscription returned an expired placeholder node", item.Error)
+	}
 }
 
 func TestSubscriptionFetchErrorMessage_RedactsURLQuery(t *testing.T) {

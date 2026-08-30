@@ -25,6 +25,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	openaiutil "github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"golang.org/x/net/html"
 	"gopkg.in/yaml.v3"
 )
 
@@ -253,6 +254,10 @@ type ProxySubscriptionScanStatus struct {
 	ScanBudgetMinutes    int        `json:"scan_budget_minutes,omitempty"`
 	ScanBudgetMaxMinutes int        `json:"scan_budget_max_minutes,omitempty"`
 }
+
+const (
+	proxySubscriptionScanHeartbeat = 15 * time.Second
+)
 
 const allocateProxySidecarPortSQL = `
 SELECT candidate
@@ -846,10 +851,11 @@ func (s *adminServiceImpl) ScanProxySubscriptionSource(ctx context.Context, id i
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
-	if err := s.tryStartProxySubscriptionScan(id); err != nil {
+	jobID, _, err := s.tryStartProxySubscriptionScan(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	return s.scanProxySubscriptionSource(ctx, id)
+	return s.scanProxySubscriptionSource(ctx, id, jobID)
 }
 
 func (s *adminServiceImpl) StartProxySubscriptionScan(ctx context.Context, id int64) (*ProxySubscriptionScanStatus, error) {
@@ -860,20 +866,24 @@ func (s *adminServiceImpl) StartProxySubscriptionScan(ctx context.Context, id in
 	if err != nil {
 		return nil, err
 	}
-	if err := s.tryStartProxySubscriptionScan(id); err != nil {
+	jobID, startedAt, err := s.tryStartProxySubscriptionScan(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	status := s.proxySubscriptionScanStatus(source)
+	status := proxySubscriptionScanStatus(source, startedAt)
 	go func() {
-		if _, scanErr := s.scanProxySubscriptionSource(context.Background(), id); scanErr != nil {
+		if _, scanErr := s.scanProxySubscriptionSource(context.Background(), id, jobID); scanErr != nil {
 			logger.LegacyPrintf("service.proxy_subscription_scan", "[ProxySubscriptionScan] source=%d failed: %v", id, scanErr)
 		}
 	}()
 	return status, nil
 }
 
-func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id int64) (*ProxySubscriptionScanResult, error) {
-	defer s.finishProxySubscriptionScan()
+func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id, jobID int64) (result *ProxySubscriptionScanResult, err error) {
+	heartbeatCtx, stopHeartbeat := context.WithCancel(context.Background())
+	defer stopHeartbeat()
+	go s.heartbeatProxySubscriptionScan(heartbeatCtx, jobID)
+	defer func() { s.finishProxySubscriptionScan(jobID, err) }()
 	source, err := s.getProxySubscriptionSourceForScan(ctx, id)
 	if err != nil {
 		return nil, err
@@ -885,8 +895,14 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
-	preview, err := s.PreviewProxyImport(scanCtx, ProxyImportPreviewInput{URL: source.URL, Provider: source.Provider})
+	var preview *ProxyImportPreview
+	preview, err = s.PreviewProxyImport(scanCtx, ProxyImportPreviewInput{URL: source.URL, Provider: source.Provider})
 	if err != nil {
+		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_scan_at = NOW(), last_error = $2, updated_at = NOW() WHERE id = $1`, id, err.Error())
+		return nil, err
+	}
+	if preview == nil || len(preview.Items) == 0 || preview.Valid == 0 {
+		err = infraerrors.BadRequest("PROXY_SUBSCRIPTION_NO_VALID_NODES", "subscription response contains no valid proxy nodes")
 		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_scan_at = NOW(), last_error = $2, updated_at = NOW() WHERE id = $1`, id, err.Error())
 		return nil, err
 	}
@@ -900,7 +916,7 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 	}
 	evaluations := s.evaluateProxySubscriptionItems(scanCtx, source, items, strategy, existingNodes)
 	selectedStatuses := selectProxySubscriptionItems(items, source, strategy, evaluations)
-	result := &ProxySubscriptionScanResult{SourceID: id, Total: preview.Total, Parsed: len(items), Strategy: strategy, ScannedAt: time.Now()}
+	result = &ProxySubscriptionScanResult{SourceID: id, Total: preview.Total, Parsed: len(items), Strategy: strategy, ScannedAt: time.Now()}
 	sidecarCount := 0
 	activeKeys := make(map[string]struct{}, len(items))
 	processedKeys := make(map[string]struct{}, len(items))
@@ -1055,7 +1071,7 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 	return result, nil
 }
 
-func (s *adminServiceImpl) proxySubscriptionScanStatus(source *ProxySubscriptionSource) *ProxySubscriptionScanStatus {
+func proxySubscriptionScanStatus(source *ProxySubscriptionSource, startedAt time.Time) *ProxySubscriptionScanStatus {
 	status := &ProxySubscriptionScanStatus{Active: true}
 	if source != nil {
 		status.SourceID = source.ID
@@ -1064,11 +1080,9 @@ func (s *adminServiceImpl) proxySubscriptionScanStatus(source *ProxySubscription
 		status.ScanBudgetMinutes = strategy.ScanBudgetMinutes
 		status.ScanBudgetMaxMinutes = strategy.ScanBudgetMaxMinutes
 	}
-	s.scanStateMu.Lock()
-	startedAt := s.scanStartedAt
-	s.scanStateMu.Unlock()
 	if !startedAt.IsZero() {
-		status.StartedAt = &startedAt
+		startedAtCopy := startedAt
+		status.StartedAt = &startedAtCopy
 		status.ElapsedSeconds = int(time.Since(startedAt).Seconds())
 	}
 	return status
@@ -1079,29 +1093,41 @@ func (s *adminServiceImpl) GetProxySubscriptionScanStatus(ctx context.Context) (
 	if s == nil {
 		return status, nil
 	}
-	s.scanStateMu.Lock()
-	active := s.scanActive
-	sourceID := s.scanActiveSourceID
-	startedAt := s.scanStartedAt
-	s.scanStateMu.Unlock()
-	if !active || sourceID <= 0 {
-		return status, nil
-	}
-	status.Active = true
-	status.SourceID = sourceID
-	if !startedAt.IsZero() {
-		status.StartedAt = &startedAt
-		status.ElapsedSeconds = int(time.Since(startedAt).Seconds())
-	}
 	if s.entClient == nil {
 		return status, nil
 	}
-	source, err := s.getProxySubscriptionSourceForScan(ctx, sourceID)
-	if err != nil {
-		return status, nil
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_scan_jobs
+SET status = 'failed', finished_at = NOW(), last_error = 'scan lease expired', updated_at = NOW()
+WHERE status = 'running' AND heartbeat_at < NOW() - INTERVAL '2 minutes'`); err != nil {
+		return status, err
 	}
-	status.SourceName = source.Name
-	strategy := normalizeProxySubscriptionStrategy(source.Strategy)
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT j.source_id, s.name, j.started_at, COALESCE(s.strategy_json::text, '{}')
+FROM proxy_subscription_scan_jobs j
+JOIN proxy_subscription_sources s ON s.id = j.source_id
+WHERE j.status = 'running' AND j.heartbeat_at >= NOW() - INTERVAL '2 minutes'
+ORDER BY j.started_at DESC
+LIMIT 1`)
+	if err != nil {
+		return status, err
+	}
+	defer func() { _ = rows.Close() }()
+	var sourceID int64
+	var sourceName, strategyRaw string
+	var startedAt time.Time
+	if !rows.Next() {
+		return status, rows.Err()
+	}
+	if err := rows.Scan(&sourceID, &sourceName, &startedAt, &strategyRaw); err != nil {
+		return status, err
+	}
+	status.Active = true
+	status.SourceID = sourceID
+	status.SourceName = sourceName
+	status.StartedAt = &startedAt
+	status.ElapsedSeconds = maxInt(0, int(time.Since(startedAt).Seconds()))
+	strategy := normalizeProxySubscriptionStrategy(parseProxySubscriptionStrategy(strategyRaw))
 	status.ScanBudgetMinutes = strategy.ScanBudgetMinutes
 	status.ScanBudgetMaxMinutes = strategy.ScanBudgetMaxMinutes
 	return status, nil
@@ -1197,26 +1223,72 @@ WHERE id = $1 AND deleted_at IS NULL AND status = 'active'`, id)
 	item.LastScanResult = parseJSONMap(scanResultRaw)
 	return &item, rows.Err()
 }
-func (s *adminServiceImpl) tryStartProxySubscriptionScan(sourceID int64) error {
-	s.scanStateMu.Lock()
-	defer s.scanStateMu.Unlock()
-	if s.scanActive {
-		if s.scanActiveSourceID == sourceID {
-			return infraerrors.Conflict("PROXY_SUBSCRIPTION_SCAN_BUSY", "proxy subscription scan is already running for this source")
-		}
-		return infraerrors.Conflict("PROXY_SUBSCRIPTION_SCAN_BUSY", "another proxy subscription scan is already running")
+func (s *adminServiceImpl) tryStartProxySubscriptionScan(ctx context.Context, sourceID int64) (int64, time.Time, error) {
+	if s == nil || s.entClient == nil {
+		return 0, time.Time{}, infraerrors.ServiceUnavailable("PROXY_SUBSCRIPTION_UNAVAILABLE", "proxy subscription service unavailable")
 	}
-	s.scanActive = true
-	s.scanActiveSourceID = sourceID
-	s.scanStartedAt = time.Now()
-	return nil
+	if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_scan_jobs
+SET status = 'failed', finished_at = NOW(), last_error = 'scan lease expired', updated_at = NOW()
+		WHERE status = 'running' AND heartbeat_at < NOW() - INTERVAL '2 minutes'`); err != nil {
+		return 0, time.Time{}, fmt.Errorf("expire stale proxy subscription scans: %w", err)
+	}
+	rows, err := s.entClient.QueryContext(ctx, `
+INSERT INTO proxy_subscription_scan_jobs (source_id, status, started_at, heartbeat_at, updated_at)
+VALUES ($1, 'running', NOW(), NOW(), NOW())
+ON CONFLICT DO NOTHING
+RETURNING id, started_at`, sourceID)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("start proxy subscription scan: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if rows.Err() != nil {
+			return 0, time.Time{}, fmt.Errorf("read proxy subscription scan: %w", rows.Err())
+		}
+		return 0, time.Time{}, infraerrors.Conflict("PROXY_SUBSCRIPTION_SCAN_BUSY", "another proxy subscription scan is already running")
+	}
+	var jobID int64
+	var startedAt time.Time
+	if err := rows.Scan(&jobID, &startedAt); err != nil {
+		return 0, time.Time{}, fmt.Errorf("read proxy subscription scan: %w", err)
+	}
+	return jobID, startedAt, nil
 }
-func (s *adminServiceImpl) finishProxySubscriptionScan() {
-	s.scanStateMu.Lock()
-	defer s.scanStateMu.Unlock()
-	s.scanActive = false
-	s.scanActiveSourceID = 0
-	s.scanStartedAt = time.Time{}
+func (s *adminServiceImpl) finishProxySubscriptionScan(jobID int64, scanErr error) {
+	if jobID <= 0 || s.entClient == nil {
+		return
+	}
+	status := "succeeded"
+	lastError := ""
+	if scanErr != nil {
+		status = "failed"
+		lastError = scanErr.Error()
+	}
+	_, _ = s.entClient.ExecContext(context.Background(), `
+UPDATE proxy_subscription_scan_jobs
+SET status = $2, finished_at = NOW(), heartbeat_at = NOW(), last_error = NULLIF($3, ''), updated_at = NOW()
+WHERE id = $1 AND status = 'running'`, jobID, status, lastError)
+}
+func (s *adminServiceImpl) heartbeatProxySubscriptionScan(ctx context.Context, jobID int64) {
+	ticker := time.NewTicker(proxySubscriptionScanHeartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if jobID <= 0 || s.entClient == nil {
+				return
+			}
+			if _, err := s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_scan_jobs
+SET heartbeat_at = NOW(), updated_at = NOW()
+WHERE id = $1 AND status = 'running'`, jobID); err != nil {
+				logger.LegacyPrintf("service.proxy_subscription_scan", "[ProxySubscriptionScan] heartbeat failed for job=%d: %v", jobID, err)
+			}
+		}
+	}
 }
 func (s *adminServiceImpl) loadProxySubscriptionNodeState(ctx context.Context, sourceID int64) (map[string]ProxySubscriptionNode, error) {
 	nodes, err := s.ListProxySubscriptionNodes(ctx, sourceID)
@@ -1793,7 +1865,9 @@ func (s *adminServiceImpl) refreshProxySidecarEndpointReadiness(ctx context.Cont
 	host := sidecarProbeHost()
 	lastError := fmt.Sprintf("sidecar endpoint %s:%d is not ready", host, port)
 	lastStartedAt := any(nil)
-	if s.proxyProber != nil {
+	if !isLocalTCPPortReachable(ctx, host, port) {
+		// Keep the endpoint pending until the sidecar actually starts listening.
+	} else if s.proxyProber != nil {
 		probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		exitInfo, _, probeErr := s.proxyProber.ProbeProxy(probeCtx, (&Proxy{Protocol: "socks5", Host: host, Port: port}).URL())
 		cancel()
@@ -2276,11 +2350,7 @@ func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Con
 	return err
 }
 func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation, port int) error {
-	proxyName := strings.TrimSpace(item.Name)
-	if proxyName == "" {
-		proxyName = fmt.Sprintf("%s:%d", item.Host, item.Port)
-	}
-	proxyName = fmt.Sprintf("%s / %s", source.Name, proxyName)
+	proxyName := proxySubscriptionSidecarProxyName(source.Name, item)
 	qualityStatus := ProxyQualityDegraded
 	if evaluation.LastError == "" && evaluation.LatencyMs != nil && *evaluation.LatencyMs <= 1500 {
 		qualityStatus = ProxyQualityHealthy
@@ -2309,6 +2379,17 @@ WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
 		return err
 	}
 	return s.refreshProxySidecarEndpointReadiness(ctx, nodeID, proxy.ID, port)
+}
+
+func proxySubscriptionSidecarProxyName(sourceName string, item ProxyImportPreviewItem) string {
+	nodeName := strings.TrimSpace(item.Name)
+	if nodeName == "" {
+		nodeName = fmt.Sprintf("%s:%d", item.Host, item.Port)
+	}
+	if sourceName = strings.TrimSpace(sourceName); sourceName == "" {
+		return nodeName
+	}
+	return fmt.Sprintf("%s / %s", sourceName, nodeName)
 }
 func (s *adminServiceImpl) findProxyByAddress(ctx context.Context, host string, port int, username, password string) (*Proxy, bool, error) {
 	if s == nil || s.entClient == nil {
@@ -3099,9 +3180,24 @@ func parseClashYAML(content, provider string) []ProxyImportPreviewItem {
 	}
 	items := make([]ProxyImportPreviewItem, 0, len(root.Proxies))
 	for _, p := range root.Proxies {
-		typ := strings.ToLower(fmt.Sprint(p["type"]))
-		item := ProxyImportPreviewItem{Name: strings.TrimSpace(fmt.Sprint(p["name"])), Protocol: typ, Host: strings.TrimSpace(fmt.Sprint(p["server"])), Username: strings.TrimSpace(fmt.Sprint(p["username"])), Password: strings.TrimSpace(fmt.Sprint(p["password"])), Provider: provider, Source: "clash", QualityStatus: ProxyQualityHealthy}
-		item.Port, _ = strconv.Atoi(fmt.Sprint(p["port"]))
+		typ := strings.ToLower(clashValueString(p, "type"))
+		item := ProxyImportPreviewItem{
+			Name:          clashValueString(p, "name"),
+			Protocol:      typ,
+			Host:          clashValueString(p, "server"),
+			Username:      clashValueString(p, "username"),
+			Password:      clashValueString(p, "password"),
+			Provider:      provider,
+			Source:        "clash",
+			QualityStatus: ProxyQualityHealthy,
+		}
+		item.Port = clashValueInt(p, "port")
+		if item.Username == "" {
+			item.Username = clashValueString(p, "uuid")
+		}
+		if item.Username == "" {
+			item.Username = item.Password
+		}
 		switch typ {
 		case "http", "https", "socks5", "socks5h":
 			item.ProxyType = "direct"
@@ -3116,9 +3212,146 @@ func parseClashYAML(content, provider string) []ProxyImportPreviewItem {
 				item.Error = "sidecar proxy is missing credentials"
 			}
 		}
+		if item.Valid && isProxySubscriptionPlaceholder(item) {
+			item.Valid = false
+			item.Error = "subscription returned an expired placeholder node"
+		}
+		item.Raw = clashProxyRawURI(p, item)
 		items = append(items, item)
 	}
 	return dedupeImportItems(items)
+}
+
+func isProxySubscriptionPlaceholder(item ProxyImportPreviewItem) bool {
+	host := strings.ToLower(strings.TrimSpace(item.Host))
+	name := strings.ToLower(strings.TrimSpace(item.Name))
+	if host == "0.0.0.0" && item.Port > 0 && item.Port <= 3 {
+		return true
+	}
+	for _, marker := range []string{"subscription expired", "expired subscription", "订阅已失效", "订阅已过期", "重新获取"} {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func clashValueString(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok || value == nil {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprint(value))
+		if text != "" && text != "<nil>" {
+			return text
+		}
+	}
+	return ""
+}
+
+func clashValueInt(values map[string]any, key string) int {
+	value := clashValueString(values, key)
+	port, _ := strconv.Atoi(value)
+	return port
+}
+
+func clashNestedValue(values map[string]any, key string) map[string]any {
+	value, ok := values[key]
+	if !ok {
+		return nil
+	}
+	switch nested := value.(type) {
+	case map[string]any:
+		return nested
+	case map[any]any:
+		converted := make(map[string]any, len(nested))
+		for nestedKey, nestedValue := range nested {
+			converted[fmt.Sprint(nestedKey)] = nestedValue
+		}
+		return converted
+	default:
+		return nil
+	}
+}
+
+func clashValueBool(values map[string]any, keys ...string) (bool, bool) {
+	for _, key := range keys {
+		value, ok := values[key]
+		if !ok || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case bool:
+			return typed, true
+		case string:
+			parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+			if err == nil {
+				return parsed, true
+			}
+		}
+	}
+	return false, false
+}
+
+func clashProxyRawURI(values map[string]any, item ProxyImportPreviewItem) string {
+	if item.Protocol == "" || item.Host == "" || item.Port <= 0 {
+		return ""
+	}
+	u := &url.URL{
+		Scheme:   item.Protocol,
+		Host:     net.JoinHostPort(item.Host, strconv.Itoa(item.Port)),
+		Fragment: item.Name,
+	}
+	if item.Username != "" {
+		if item.ProxyType == "direct" && item.Password != "" {
+			u.User = url.UserPassword(item.Username, item.Password)
+		} else {
+			u.User = url.User(item.Username)
+		}
+	}
+	query := u.Query()
+	if tls, ok := clashValueBool(values, "tls"); ok && !tls {
+		query.Set("security", "none")
+	}
+	if serverName := clashValueString(values, "servername", "sni", "server_name"); serverName != "" {
+		query.Set("sni", serverName)
+	}
+	if skipVerify, ok := clashValueBool(values, "skip-cert-verify", "skip_cert_verify"); ok {
+		query.Set("insecure", strconv.FormatBool(skipVerify))
+	}
+	if fingerprint := clashValueString(values, "client-fingerprint", "fingerprint"); fingerprint != "" {
+		query.Set("fp", fingerprint)
+	}
+	if network := clashValueString(values, "network", "transport"); network != "" {
+		query.Set("type", network)
+	}
+	if flow := clashValueString(values, "flow"); flow != "" {
+		query.Set("flow", flow)
+	}
+	if ws := clashNestedValue(values, "ws-opts"); ws != nil {
+		if path := clashValueString(ws, "path"); path != "" {
+			query.Set("path", path)
+		}
+		if headers := clashNestedValue(ws, "headers"); headers != nil {
+			if hostHeader := clashValueString(headers, "Host", "host"); hostHeader != "" {
+				query.Set("host", hostHeader)
+			}
+		}
+	}
+	if grpc := clashNestedValue(values, "grpc-opts"); grpc != nil {
+		if serviceName := clashValueString(grpc, "grpc-service-name", "service-name", "service_name"); serviceName != "" {
+			query.Set("serviceName", serviceName)
+		}
+	}
+	if obfs := clashValueString(values, "obfs"); obfs != "" {
+		query.Set("obfs", obfs)
+	}
+	if obfsPassword := clashValueString(values, "obfs-password", "obfs_password"); obfsPassword != "" {
+		query.Set("obfs-password", obfsPassword)
+	}
+	u.RawQuery = query.Encode()
+	return u.String()
 }
 func parseSingBoxJSON(content, provider string) []ProxyImportPreviewItem {
 	var root struct {
@@ -3189,37 +3422,137 @@ func fetchProxySubscription(ctx context.Context, rawURL string) (string, error) 
 	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
 		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
 	}
+	body, contentType, err := fetchProxySubscriptionResponse(ctx, parsedURL)
+	if err != nil {
+		return "", err
+	}
+	if !isHTMLSubscriptionResponse(contentType, body) {
+		return body, nil
+	}
+
+	// Some subscription providers use the bare URL for a download page and
+	// expose the actual client formats behind same-origin flag links.
+	if downloadURL := findProxySubscriptionDownloadURL(parsedURL, body); downloadURL != nil {
+		body, contentType, err = fetchProxySubscriptionResponse(ctx, downloadURL)
+		if err != nil {
+			return "", err
+		}
+		if !isHTMLSubscriptionResponse(contentType, body) {
+			return body, nil
+		}
+	}
+	return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", fmt.Sprintf("subscription response from %s is HTML, not proxy configuration", parsedURL.Hostname()))
+}
+
+func fetchProxySubscriptionResponse(ctx context.Context, parsedURL *url.URL) (string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
 	if err != nil {
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
+		return "", "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
 	}
 	req.Header.Set("User-Agent", proxySubscriptionClientUserAgent)
 	req.Header.Set("Accept", "text/yaml, application/x-yaml, text/plain, application/json;q=0.9, */*;q=0.8")
-	resp, err := http.DefaultClient.Do(req)
+	client := *http.DefaultClient
+	client.CheckRedirect = func(redirectReq *http.Request, _ []*http.Request) error {
+		if !sameProxySubscriptionOrigin(parsedURL, redirectReq.URL) {
+			return fmt.Errorf("subscription redirect changed origin")
+		}
+		return nil
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || subscriptionFetchTimedOut(err) {
-			return "", infraerrors.GatewayTimeout("PROXY_SUBSCRIPTION_FETCH_TIMEOUT", "subscription request timed out").WithCause(err)
+			return "", "", infraerrors.GatewayTimeout("PROXY_SUBSCRIPTION_FETCH_TIMEOUT", "subscription request timed out").WithCause(err)
 		}
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", subscriptionFetchErrorMessage(parsedURL.Host, err)).WithCause(err)
+		return "", "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", subscriptionFetchErrorMessage(parsedURL.Host, err)).WithCause(err)
 	}
 	defer func() {
 		_ = resp.Body.Close()
 	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", fmt.Sprintf("subscription URL returned HTTP %d", resp.StatusCode))
+		return "", "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", fmt.Sprintf("subscription URL returned HTTP %d", resp.StatusCode))
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 5<<20))
 	if err != nil {
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "failed to read subscription response").WithCause(err)
+		return "", "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "failed to read subscription response").WithCause(err)
 	}
 	body := string(data)
 	if strings.TrimSpace(body) == "" {
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "subscription response is empty")
+		return "", "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "subscription response is empty")
 	}
-	if isHTMLSubscriptionResponse(resp.Header.Get("Content-Type"), body) {
-		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", fmt.Sprintf("subscription response from %s is HTML, not proxy configuration", parsedURL.Hostname()))
+	return body, resp.Header.Get("Content-Type"), nil
+}
+
+func findProxySubscriptionDownloadURL(baseURL *url.URL, body string) *url.URL {
+	if baseURL == nil || strings.TrimSpace(body) == "" {
+		return nil
 	}
-	return body, nil
+	tokenizer := html.NewTokenizer(strings.NewReader(body))
+	var v2URL *url.URL
+	for {
+		tokenType := tokenizer.Next()
+		if tokenType == html.ErrorToken {
+			return v2URL
+		}
+		if tokenType != html.StartTagToken {
+			continue
+		}
+		token := tokenizer.Token()
+		if !strings.EqualFold(token.Data, "a") {
+			continue
+		}
+		var href string
+		for _, attr := range token.Attr {
+			if strings.EqualFold(attr.Key, "href") {
+				href = strings.TrimSpace(attr.Val)
+				break
+			}
+		}
+		if href == "" {
+			continue
+		}
+		candidate, err := url.Parse(href)
+		if err != nil || (candidate.Scheme != "" && !strings.EqualFold(candidate.Scheme, "http") && !strings.EqualFold(candidate.Scheme, "https")) {
+			continue
+		}
+		candidate = baseURL.ResolveReference(candidate)
+		if !sameProxySubscriptionOrigin(baseURL, candidate) || candidate.User != nil {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(candidate.Query().Get("flag"))) {
+		case "clash":
+			return candidate
+		case "v2", "v2ray":
+			if v2URL == nil {
+				v2URL = candidate
+			}
+		}
+	}
+}
+
+func sameProxySubscriptionOrigin(baseURL, candidate *url.URL) bool {
+	if baseURL == nil || candidate == nil {
+		return false
+	}
+	return strings.EqualFold(baseURL.Scheme, candidate.Scheme) &&
+		strings.EqualFold(baseURL.Hostname(), candidate.Hostname()) &&
+		proxySubscriptionURLPort(baseURL) == proxySubscriptionURLPort(candidate)
+}
+
+func proxySubscriptionURLPort(value *url.URL) string {
+	if value == nil {
+		return ""
+	}
+	if port := value.Port(); port != "" {
+		return port
+	}
+	switch strings.ToLower(value.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
 }
 
 func isHTMLSubscriptionResponse(contentType, body string) bool {

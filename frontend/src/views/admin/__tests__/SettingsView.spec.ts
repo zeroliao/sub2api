@@ -52,7 +52,9 @@ const {
     exempt_admin: true,
     public_ip_rpm: 300,
   }),
-  updatePanelRateLimitSettings: vi.fn().mockImplementation(async (payload) => payload),
+  updatePanelRateLimitSettings: vi
+    .fn()
+    .mockImplementation(async (payload) => payload),
   getStreamTimeoutSettings: vi.fn(),
   getRectifierSettings: vi.fn(),
   getBetaPolicySettings: vi.fn(),
@@ -61,6 +63,14 @@ const {
     interval_minutes: 30,
   }),
   updateUpstreamBillingProbeSettings: vi
+    .fn()
+    .mockImplementation(async (payload) => payload),
+  getOllamaCloudUsageSettings: vi.fn().mockResolvedValue({
+    enabled: false,
+    interval_minutes: 90,
+    debounce_minutes: 3,
+  }),
+  updateOllamaCloudUsageSettings: vi
     .fn()
     .mockImplementation(async (payload) => payload),
   getGroups: vi.fn(),
@@ -144,6 +154,20 @@ vi.mock("@/utils/apiError", () => ({
 vi.mock("vue-i18n", async () => {
   const actual = await vi.importActual<typeof import("vue-i18n")>("vue-i18n");
   const translations: Record<string, string> = {
+    "admin.settings.security.passkeyNotConfigured": "Passkey 未配置",
+    "admin.settings.security.passkeyRPID": "webauthn.rp_id",
+    "admin.settings.security.passkeyOrigins": "webauthn.rp_origins",
+    "admin.settings.security.passkeyValueNotConfigured": "未配置",
+    "admin.settings.security.passkeyDeploymentHint":
+      "请配置 webauthn.enabled、webauthn.rp_id 和 webauthn.rp_origins，然后重启服务。",
+    "admin.settings.openaiFastPolicy.summaryAllModels": "全部模型",
+    "admin.settings.openaiFastPolicy.summaryTargetModels": "目标模型",
+    "admin.settings.openaiFastPolicy.summaryOtherModels": "其他模型",
+    "admin.settings.openaiFastPolicy.summaryAction.pass": "透传",
+    "admin.settings.openaiFastPolicy.summaryAction.filter": "过滤",
+    "admin.settings.openaiFastPolicy.summaryAction.force_priority":
+      "强制 priority",
+    "admin.settings.openaiFastPolicy.summaryAction.block": "拦截",
     "admin.settings.wechatConnect.title": "微信登录",
     "admin.settings.wechatConnect.description":
       "用于微信开放平台或公众号/小程序的第三方登录配置。",
@@ -646,12 +670,18 @@ describe("admin SettingsView email domain quota copy", () => {
   it("documents the email domain quota and empty-whitelist behavior in both locales", () => {
     expect(zhCommon.auth.emailDomainRegistrationLimit).toContain("主流邮箱");
     expect(zhCommon.auth.emailDomainRegistrationLimit).toContain("联系客服");
-    expect(enCommon.auth.emailDomainRegistrationLimit).toContain("mainstream email");
-    expect(enCommon.auth.emailDomainRegistrationLimit).toContain("contact support");
+    expect(enCommon.auth.emailDomainRegistrationLimit).toContain(
+      "mainstream email",
+    );
+    expect(enCommon.auth.emailDomainRegistrationLimit).toContain(
+      "contact support",
+    );
 
     // 白名单 hint 描述严格默认语义；额度语义移入独立开关的 hint。
-    const zhWhitelistHint = zhSettings.settings.registration.emailSuffixWhitelistHint;
-    const enWhitelistHint = enSettings.settings.registration.emailSuffixWhitelistHint;
+    const zhWhitelistHint =
+      zhSettings.settings.registration.emailSuffixWhitelistHint;
+    const enWhitelistHint =
+      enSettings.settings.registration.emailSuffixWhitelistHint;
     expect(zhWhitelistHint).toContain("留空则不限制");
     expect(enWhitelistHint).toContain("leave empty for no restriction");
 
@@ -677,10 +707,12 @@ describe("admin SettingsView payment visible method controls", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
-    getUpstreamBillingProbeSettings.mockReset();
-    updateUpstreamBillingProbeSettings.mockReset();
-    getOllamaCloudUsageSettings.mockReset();
-    updateOllamaCloudUsageSettings.mockReset();
+    getPanelRateLimitSettings.mockClear();
+    updatePanelRateLimitSettings.mockClear();
+    getUpstreamBillingProbeSettings.mockClear();
+    updateUpstreamBillingProbeSettings.mockClear();
+    getOllamaCloudUsageSettings.mockClear();
+    updateOllamaCloudUsageSettings.mockClear();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -745,6 +777,14 @@ describe("admin SettingsView payment visible method controls", () => {
     updateUpstreamBillingProbeSettings.mockImplementation(
       async (payload) => payload,
     );
+    getOllamaCloudUsageSettings.mockResolvedValue({
+      enabled: false,
+      interval_minutes: 90,
+      debounce_minutes: 3,
+    });
+    updateOllamaCloudUsageSettings.mockImplementation(
+      async (payload) => payload,
+    );
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({
       items: [],
@@ -789,9 +829,13 @@ describe("admin SettingsView payment visible method controls", () => {
 
     expect(getPanelRateLimitSettings).toHaveBeenCalled();
     expect(wrapper.text()).toContain("admin.settings.panelRateLimit.title");
-    expect(wrapper.text()).toContain("admin.settings.panelRateLimit.proxySafeNote");
+    expect(wrapper.text()).toContain(
+      "admin.settings.panelRateLimit.proxySafeNote",
+    );
 
-    const userRpmInput = wrapper.find('[data-testid="panel-rate-limit-user-rpm"]');
+    const userRpmInput = wrapper.find(
+      '[data-testid="panel-rate-limit-user-rpm"]',
+    );
     expect(userRpmInput.exists()).toBe(true);
     await userRpmInput.setValue("120");
 
@@ -852,7 +896,9 @@ describe("admin SettingsView payment visible method controls", () => {
     // 默认选中 Turnstile
     expect(wrapper.text()).toContain("admin.settings.turnstile.siteKey");
 
-    await wrapper.get('[data-testid="captcha-provider-tencent"]').trigger("click");
+    await wrapper
+      .get('[data-testid="captcha-provider-tencent"]')
+      .trigger("click");
     await flushPromises();
 
     const card = wrapper
@@ -860,12 +906,22 @@ describe("admin SettingsView payment visible method controls", () => {
       .find((node) => node.text().includes("admin.settings.captcha.title"));
     expect(card).toBeDefined();
     expect(card!.text()).not.toContain("admin.settings.turnstile.siteKey");
-    expect(card!.get('a[href="https://console.cloud.tencent.com/captcha"]').exists()).toBe(true);
-    expect(card!.get('a[href="https://console.cloud.tencent.com/cam/capi"]').exists()).toBe(true);
     expect(
-      card!.get('a[href="https://cloud.tencent.com/document/product/1110/36841"]').exists(),
+      card!.get('a[href="https://console.cloud.tencent.com/captcha"]').exists(),
     ).toBe(true);
-    const inputs = card!.findAll("input").filter((input) => input.attributes("type") !== "checkbox");
+    expect(
+      card!
+        .get('a[href="https://console.cloud.tencent.com/cam/capi"]')
+        .exists(),
+    ).toBe(true);
+    expect(
+      card!
+        .get('a[href="https://cloud.tencent.com/document/product/1110/36841"]')
+        .exists(),
+    ).toBe(true);
+    const inputs = card!
+      .findAll("input")
+      .filter((input) => input.attributes("type") !== "checkbox");
     await inputs[0]!.setValue("123456789");
     await inputs[1]!.setValue("app-secret-value");
     await inputs[2]!.setValue("cloud-secret-id-value");
@@ -894,17 +950,25 @@ describe("admin SettingsView payment visible method controls", () => {
     await openSecurityTab(wrapper);
 
     await wrapper.get('[data-testid="captcha-enabled-toggle"]').setValue(true);
-    await wrapper.get('[data-testid="captcha-provider-tencent"]').trigger("click");
-    await wrapper.get('[data-testid="tencent-captcha-region-intl"]').trigger("click");
+    await wrapper
+      .get('[data-testid="captcha-provider-tencent"]')
+      .trigger("click");
+    await wrapper
+      .get('[data-testid="tencent-captcha-region-intl"]')
+      .trigger("click");
 
     const card = wrapper
       .findAll(".card")
       .find((node) => node.text().includes("admin.settings.captcha.title"));
     expect(card).toBeDefined();
-    expect(card!.get('a[href="https://console.tencentcloud.com/captcha/graphical"]').exists()).toBe(
-      true,
-    );
-    expect(card!.get('a[href="https://console.tencentcloud.com/cam/capi"]').exists()).toBe(true);
+    expect(
+      card!
+        .get('a[href="https://console.tencentcloud.com/captcha/graphical"]')
+        .exists(),
+    ).toBe(true);
+    expect(
+      card!.get('a[href="https://console.tencentcloud.com/cam/capi"]').exists(),
+    ).toBe(true);
 
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
@@ -925,7 +989,9 @@ describe("admin SettingsView payment visible method controls", () => {
     const masterToggle = wrapper.get('[data-testid="captcha-enabled-toggle"]');
     await masterToggle.setValue(true);
 
-    await wrapper.get('[data-testid="captcha-provider-aliyun"]').trigger("click");
+    await wrapper
+      .get('[data-testid="captcha-provider-aliyun"]')
+      .trigger("click");
     await flushPromises();
 
     const card = wrapper
@@ -934,7 +1000,9 @@ describe("admin SettingsView payment visible method controls", () => {
     expect(card).toBeDefined();
     expect(card!.text()).toContain("admin.settings.aliyunCaptcha.region");
     expect(card!.text()).not.toContain("admin.settings.turnstile.siteKey");
-    const inputs = card!.findAll("input").filter((input) => input.attributes("type") !== "checkbox");
+    const inputs = card!
+      .findAll("input")
+      .filter((input) => input.attributes("type") !== "checkbox");
     await inputs[0]!.setValue("prefix-1");
     await inputs[1]!.setValue("scene-1");
     await inputs[2]!.setValue("ak-id");
@@ -1002,11 +1070,11 @@ describe("admin SettingsView payment visible method controls", () => {
     await openSecurityTab(wrapper);
 
     const settings = wrapper.get('[data-testid="passkey-settings"]');
-    expect(settings.get('[data-testid="passkey-toggle"]').attributes("disabled")).toBeDefined();
+    expect(
+      settings.get('[data-testid="passkey-toggle"]').attributes("disabled"),
+    ).toBeDefined();
     const status = settings.get('[data-testid="passkey-config-status"]');
-    expect(status.text()).toContain(
-      "admin.settings.security.passkeyNotConfigured",
-    );
+    expect(status.text()).toContain("Passkey 未配置");
     expect(status.text()).toContain("webauthn.enabled");
     expect(status.text()).toContain("webauthn.rp_id");
     expect(status.text()).toContain("webauthn.rp_origins");
@@ -1407,7 +1475,9 @@ describe("admin SettingsView payment visible method controls", () => {
     const mappingToggle = wrapper.get(
       '[data-testid="grok-cross-client-model-map-toggle"]',
     );
-    expect((modelInput.element as HTMLInputElement).value).toBe("grok-4.1-fast");
+    expect((modelInput.element as HTMLInputElement).value).toBe(
+      "grok-4.1-fast",
+    );
     expect((mappingToggle.element as HTMLInputElement).checked).toBe(true);
 
     await modelInput.setValue("grok-custom-text");
@@ -1415,7 +1485,10 @@ describe("admin SettingsView payment visible method controls", () => {
     await wrapper.find("form").trigger("submit.prevent");
     await flushPromises();
 
-    const payload = updateSettings.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    const payload = updateSettings.mock.calls.at(-1)?.[0] as Record<
+      string,
+      unknown
+    >;
     expect(payload.grok_default_text_model).toBe("grok-custom-text");
     expect(payload.grok_cross_client_model_map_enabled).toBe(false);
   });
@@ -1426,18 +1499,32 @@ describe("admin SettingsView payment visible method controls", () => {
     await flushPromises();
     await openGatewayTab(wrapper);
 
-    const card = wrapper.get('[data-testid="ollama-cloud-usage-global-settings"]');
+    const card = wrapper.get(
+      '[data-testid="ollama-cloud-usage-global-settings"]',
+    );
     expect(card.isVisible()).toBe(true);
     expect(
-      (card.get('[data-testid="ollama-cloud-usage-global-enabled"]').element as HTMLInputElement)
-        .checked,
+      (
+        card.get('[data-testid="ollama-cloud-usage-global-enabled"]')
+          .element as HTMLInputElement
+      ).checked,
     ).toBe(false);
-    expect(card.find('[data-testid="ollama-cloud-usage-global-interval"]').exists()).toBe(false);
+    expect(
+      card.find('[data-testid="ollama-cloud-usage-global-interval"]').exists(),
+    ).toBe(false);
 
-    await card.get('[data-testid="ollama-cloud-usage-global-enabled"]').setValue(true);
-    await card.get('[data-testid="ollama-cloud-usage-global-debounce"]').setValue(3);
-    await card.get('[data-testid="ollama-cloud-usage-global-interval"]').setValue(90);
-    await card.get('[data-testid="ollama-cloud-usage-global-save"]').trigger("click");
+    await card
+      .get('[data-testid="ollama-cloud-usage-global-enabled"]')
+      .setValue(true);
+    await card
+      .get('[data-testid="ollama-cloud-usage-global-debounce"]')
+      .setValue(3);
+    await card
+      .get('[data-testid="ollama-cloud-usage-global-interval"]')
+      .setValue(90);
+    await card
+      .get('[data-testid="ollama-cloud-usage-global-save"]')
+      .trigger("click");
     await flushPromises();
 
     expect(updateOllamaCloudUsageSettings).toHaveBeenCalledWith({
@@ -1615,6 +1702,12 @@ describe("admin SettingsView wechat connect controls", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    getPanelRateLimitSettings.mockClear();
+    updatePanelRateLimitSettings.mockClear();
+    getUpstreamBillingProbeSettings.mockClear();
+    updateUpstreamBillingProbeSettings.mockClear();
+    getOllamaCloudUsageSettings.mockClear();
+    updateOllamaCloudUsageSettings.mockClear();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();
@@ -1675,6 +1768,29 @@ describe("admin SettingsView wechat connect controls", () => {
     getBetaPolicySettings.mockResolvedValue({
       rules: [],
     });
+    getPanelRateLimitSettings.mockResolvedValue({
+      enabled: true,
+      user_rpm: 240,
+      heavy_rpm: 60,
+      exempt_admin: true,
+      public_ip_rpm: 300,
+    });
+    updatePanelRateLimitSettings.mockImplementation(async (payload) => payload);
+    getUpstreamBillingProbeSettings.mockResolvedValue({
+      enabled: true,
+      interval_minutes: 30,
+    });
+    updateUpstreamBillingProbeSettings.mockImplementation(
+      async (payload) => payload,
+    );
+    getOllamaCloudUsageSettings.mockResolvedValue({
+      enabled: false,
+      interval_minutes: 90,
+      debounce_minutes: 3,
+    });
+    updateOllamaCloudUsageSettings.mockImplementation(
+      async (payload) => payload,
+    );
     getGroups.mockResolvedValue([]);
     listProxies.mockResolvedValue({
       items: [],
@@ -1865,6 +1981,12 @@ describe("admin SettingsView platform quota matrix", () => {
     getStreamTimeoutSettings.mockReset();
     getRectifierSettings.mockReset();
     getBetaPolicySettings.mockReset();
+    getPanelRateLimitSettings.mockClear();
+    updatePanelRateLimitSettings.mockClear();
+    getUpstreamBillingProbeSettings.mockClear();
+    updateUpstreamBillingProbeSettings.mockClear();
+    getOllamaCloudUsageSettings.mockClear();
+    updateOllamaCloudUsageSettings.mockClear();
     getGroups.mockReset();
     listProxies.mockReset();
     getProviders.mockReset();

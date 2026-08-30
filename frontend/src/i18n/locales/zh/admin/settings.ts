@@ -122,10 +122,12 @@ export default {
       emailVerificationHint: "新用户注册时需要验证邮箱",
       emailSuffixWhitelist: "邮箱域名白名单",
       emailSuffixWhitelistHint:
-        "仅允许使用指定域名的邮箱注册账号（例如 {'@'}qq.com, {'@'}gmail.com, *.edu.cn）",
+        "仅允许使用指定域名的邮箱注册账号（例如 {'@'}qq.com, {'@'}gmail.com, *.edu.cn）。留空则不限制。",
       emailSuffixWhitelistPlaceholder: "{'@'}example.com, *.edu.cn",
       emailSuffixWhitelistInputHint:
         "留空则不限制。使用 *.edu.cn 可匹配 edu.cn 及其子域名。",
+      emailDomainQuotaHint:
+        "开启后，其他可注册主域名各限注册一个账户；关闭时非白名单域名直接拒绝注册。",
       promoCode: "优惠码",
       promoCodeHint: "允许用户在注册时使用优惠码",
       invitationCode: "邀请码注册",
@@ -152,6 +154,15 @@ export default {
       auditRetention: "操作日志保留天数",
       auditRetentionHint:
         "超过该天数的操作日志将被自动清理；填 0 表示永久保留（仅支持手动清空）。",
+      passkey: "Passkey 登录",
+      passkeyHint: "允许用户使用 Passkey / WebAuthn 登录。",
+      passkeyConfigured: "Passkey 已配置",
+      passkeyNotConfigured: "Passkey 未配置",
+      passkeyRPID: "webauthn.rp_id",
+      passkeyOrigins: "webauthn.rp_origins",
+      passkeyValueNotConfigured: "未配置",
+      passkeyDeploymentHint:
+        "请配置 webauthn.enabled、webauthn.rp_id 和 webauthn.rp_origins，然后重启服务。",
     },
     turnstile: {
       title: "Cloudflare Turnstile",
@@ -1159,6 +1170,15 @@ export default {
       userSearchEmpty: "未找到匹配用户",
       userDeleted: "（已删除）",
       userIdFallback: "用户 #{id}",
+      summaryAllModels: "全部模型",
+      summaryTargetModels: "目标模型",
+      summaryOtherModels: "其他模型",
+      summaryAction: {
+        pass: "透传",
+        filter: "过滤",
+        force_priority: "强制 priority",
+        block: "拦截",
+      },
       removeUser: "移除用户",
       errorMessage: "错误消息",
       errorMessagePlaceholder: "拦截时返回的自定义错误消息",

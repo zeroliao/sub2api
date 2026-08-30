@@ -243,6 +243,8 @@ export default {
       USER_NOT_ACTIVE: "Account has been disabled.",
     },
     registrationFailed: "Registration failed. Please try again.",
+    emailDomainRegistrationLimit:
+      "This email domain cannot register a new account. Please use a mainstream email provider; contact support to add a business domain to the allowlist.",
     emailSuffixNotAllowed: "This email domain is not allowed for registration.",
     emailSuffixNotAllowedWithAllowed:
       "This email domain is not allowed. Allowed domains: {suffixes}",

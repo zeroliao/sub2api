@@ -742,9 +742,17 @@ func TestGrokQuotaServiceQueryQuotaFreeFallsBackToGrok45(t *testing.T) {
 	require.True(t, result.HeadersObserved)
 
 	requests, bodies := upstream.snapshot()
-	require.Len(t, requests, 3)
+	// QueryQuota also refreshes the observed model list asynchronously. Keep
+	// the quota contract focused on the two billing calls and one active probe.
+	var billingCalls, modelCalls int
 	responseCalls := 0
 	for i, req := range requests {
+		switch req.URL.Path {
+		case "/v1/billing":
+			billingCalls++
+		case "/v1/models":
+			modelCalls++
+		}
 		if req.URL.Path != "/v1/responses" {
 			continue
 		}
@@ -757,7 +765,9 @@ func TestGrokQuotaServiceQueryQuotaFreeFallsBackToGrok45(t *testing.T) {
 		require.False(t, gjson.GetBytes(bodies[i], "max_output_tokens").Exists())
 		require.False(t, gjson.GetBytes(bodies[i], "store").Exists())
 	}
+	require.Equal(t, 2, billingCalls)
 	require.Equal(t, 1, responseCalls)
+	require.LessOrEqual(t, modelCalls, 1)
 }
 
 func TestGrokQuotaServiceQueryQuotaPaidBillingSkipsActiveProbe(t *testing.T) {

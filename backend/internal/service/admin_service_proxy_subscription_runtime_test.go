@@ -131,6 +131,18 @@ func TestAllocateProxySidecarPortSQLUsesTypedBounds(t *testing.T) {
 	require.Contains(t, strings.ReplaceAll(allocateProxySidecarPortSQL, "\n", " "), "generate_series($1::int, $2::int)")
 }
 
+func TestProxySubscriptionSidecarProxyNameIsStableAcrossUpserts(t *testing.T) {
+	item := ProxyImportPreviewItem{Name: "DE 01", Host: "old.example.com", Port: 443}
+	require.Equal(t, "820010 / DE 01", proxySubscriptionSidecarProxyName("820010", item))
+
+	item.Name = "DE 02"
+	item.Host = "new.example.com"
+	item.Port = 8443
+	require.Equal(t, "820010 / DE 02", proxySubscriptionSidecarProxyName("820010", item))
+	item.Name = ""
+	require.Equal(t, "new.example.com:8443", proxySubscriptionSidecarProxyName("", item))
+}
+
 func TestResolveProxySubscriptionAPIKeyUsesGlobalSetting(t *testing.T) {
 	t.Setenv("ABUSEIPDB_API_KEY", "env-key")
 	svc := &adminServiceImpl{

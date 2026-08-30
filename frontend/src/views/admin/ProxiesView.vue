@@ -263,7 +263,7 @@
                 value === 'active' ? 'badge-success' : value === 'expired' ? 'badge-danger' : 'badge-danger'
               ]"
             >
-              {{ t('admin.accounts.status.' + value) }}
+              {{ proxyStatusLabel(value) }}
             </span>
           </template>
 
@@ -1019,9 +1019,10 @@ const protocolOptions = computed(() => [
 
 const statusOptions = computed(() => [
   { value: '', label: t('admin.proxies.allStatus') },
-  { value: 'active', label: t('admin.accounts.status.active') },
-  { value: 'inactive', label: t('admin.accounts.status.inactive') },
-  { value: 'expired', label: t('admin.proxies.expired') }
+  { value: 'active', label: t('admin.proxies.statusLabels.active') },
+  { value: 'inactive', label: t('admin.proxies.statusLabels.inactive') },
+  { value: 'disabled', label: t('admin.proxies.statusLabels.disabled') },
+  { value: 'expired', label: t('admin.proxies.statusLabels.expired') }
 ])
 
 // Form options
@@ -1033,9 +1034,15 @@ const protocolSelectOptions = computed(() => [
 ])
 
 const editStatusOptions = computed(() => [
-  { value: 'active', label: t('admin.accounts.status.active') },
-  { value: 'inactive', label: t('admin.accounts.status.inactive') }
+  { value: 'active', label: t('admin.proxies.statusLabels.active') },
+  { value: 'inactive', label: t('admin.proxies.statusLabels.inactive') }
 ])
+
+function proxyStatusLabel(status: string): string {
+  const key = `admin.proxies.statusLabels.${status}`
+  const label = t(key)
+  return label === key ? status : label
+}
 
 const proxies = ref<Proxy[]>([])
 const visiblePasswordIds = reactive(new Set<number>())

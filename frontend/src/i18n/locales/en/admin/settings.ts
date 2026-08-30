@@ -134,10 +134,12 @@ export default {
       emailVerificationHint: "Require email verification for new registrations",
       emailSuffixWhitelist: "Email Domain Whitelist",
       emailSuffixWhitelistHint:
-        "Only email addresses from the specified domains can register (for example, {'@'}qq.com, {'@'}gmail.com, *.edu.cn)",
+        "Only email addresses from the specified domains can register (for example, {'@'}qq.com, {'@'}gmail.com, *.edu.cn); leave empty for no restriction.",
       emailSuffixWhitelistPlaceholder: "{'@'}example.com, *.edu.cn",
       emailSuffixWhitelistInputHint:
         "Leave empty for no restriction. Use *.edu.cn to match edu.cn and its subdomains.",
+      emailDomainQuotaHint:
+        "When enabled, each other registrable root domain is limited to one account; When disabled, non-whitelisted domains are rejected directly.",
       promoCode: "Promo Code",
       promoCodeHint: "Allow users to use promo codes during registration",
       invitationCode: "Invitation Code Registration",
@@ -167,6 +169,15 @@ export default {
       auditRetention: "Audit Log Retention (days)",
       auditRetentionHint:
         "Audit logs older than this are cleaned up automatically. Set to 0 to keep them forever (manual clear only).",
+      passkey: "Passkey Sign-in",
+      passkeyHint: "Allow users to sign in with Passkey / WebAuthn.",
+      passkeyConfigured: "Passkey is configured",
+      passkeyNotConfigured: "Passkey is not configured",
+      passkeyRPID: "webauthn.rp_id",
+      passkeyOrigins: "webauthn.rp_origins",
+      passkeyValueNotConfigured: "Not configured",
+      passkeyDeploymentHint:
+        "Configure webauthn.enabled, webauthn.rp_id, and webauthn.rp_origins, then restart the service.",
     },
     turnstile: {
       title: "Cloudflare Turnstile",
@@ -1234,6 +1245,15 @@ export default {
       userSearchEmpty: "No matching users found",
       userDeleted: "(deleted)",
       userIdFallback: "User #{id}",
+      summaryAllModels: "All models",
+      summaryTargetModels: "Target models",
+      summaryOtherModels: "Other models",
+      summaryAction: {
+        pass: "Pass",
+        filter: "Filter",
+        force_priority: "Force priority",
+        block: "Block",
+      },
       removeUser: "Remove user",
       errorMessage: "Error message",
       errorMessagePlaceholder: "Custom error message when blocked",

@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"net/http"
-	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -706,10 +705,6 @@ type adminServiceImpl struct {
 	defaultSubAssigner   DefaultSubscriptionAssigner
 	userSubRepo          UserSubscriptionRepository
 	privacyClientFactory PrivacyClientFactory
-	scanStateMu          sync.Mutex
-	scanActive           bool
-	scanActiveSourceID   int64
-	scanStartedAt        time.Time
 	runtimeBlocker       AccountRuntimeBlocker
 	affiliateService     adminRechargeAffiliateAccruer
 	compositeRouteRepo   CompositeModelRouteRepository
