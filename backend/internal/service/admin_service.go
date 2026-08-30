@@ -679,6 +679,7 @@ const (
 	proxyQualityResponseHeaderTimeout    = 10 * time.Second
 	proxyQualityMaxBodyBytes             = int64(8 * 1024)
 	proxyQualityClientUserAgent          = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+	proxySubscriptionClientUserAgent     = "Sub2API/1.0"
 )
 
 var ErrRPMStatusUnavailable = infraerrors.New(http.StatusNotImplemented, "RPM_STATUS_UNAVAILABLE", "RPM cache not available")

@@ -3193,8 +3193,8 @@ func fetchProxySubscription(ctx context.Context, rawURL string) (string, error) 
 	if err != nil {
 		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_URL_INVALID", "invalid subscription URL").WithCause(err)
 	}
-	req.Header.Set("User-Agent", proxyQualityClientUserAgent)
-	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", proxySubscriptionClientUserAgent)
+	req.Header.Set("Accept", "text/yaml, application/x-yaml, text/plain, application/json;q=0.9, */*;q=0.8")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || subscriptionFetchTimedOut(err) {
@@ -3216,7 +3216,22 @@ func fetchProxySubscription(ctx context.Context, rawURL string) (string, error) 
 	if strings.TrimSpace(body) == "" {
 		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", "subscription response is empty")
 	}
+	if isHTMLSubscriptionResponse(resp.Header.Get("Content-Type"), body) {
+		return "", infraerrors.BadRequest("PROXY_SUBSCRIPTION_FETCH_FAILED", fmt.Sprintf("subscription response from %s is HTML, not proxy configuration", parsedURL.Hostname()))
+	}
 	return body, nil
+}
+
+func isHTMLSubscriptionResponse(contentType, body string) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	if mediaType == "text/html" || mediaType == "application/xhtml+xml" {
+		return true
+	}
+	body = strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(body, "<!doctype html") ||
+		strings.HasPrefix(body, "<html") ||
+		strings.HasPrefix(body, "<head") ||
+		strings.HasPrefix(body, "<body")
 }
 func decodeMaybeBase64Subscription(content string) string {
 	compact := strings.TrimSpace(content)
