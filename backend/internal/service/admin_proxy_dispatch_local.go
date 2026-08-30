@@ -221,6 +221,9 @@ type ProxySubscriptionNode struct {
 	SleepUntil          *time.Time `json:"sleep_until,omitempty"`
 	LastScannedAt       *time.Time `json:"last_scanned_at,omitempty"`
 	LastError           string     `json:"last_error,omitempty"`
+	ManagementStatus    string     `json:"management_status"`
+	ManagementError     string     `json:"management_error,omitempty"`
+	ManagedProxyID      *int64     `json:"managed_proxy_id,omitempty"`
 	Selected            bool       `json:"selected"`
 	SidecarRequired     bool       `json:"sidecar_required"`
 	CreatedAt           time.Time  `json:"created_at"`
@@ -235,6 +238,8 @@ type ProxySubscriptionScanResult struct {
 	SidecarRequired  int                       `json:"sidecar_required"`
 	DirectImportable int                       `json:"direct_importable"`
 	Skipped          int                       `json:"skipped"`
+	Managed          int                       `json:"managed"`
+	ManagementFailed int                       `json:"management_failed"`
 	Errors           []string                  `json:"errors,omitempty"`
 	Strategy         ProxySubscriptionStrategy `json:"strategy"`
 	ScannedAt        time.Time                 `json:"scanned_at"`
@@ -898,23 +903,42 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 	result := &ProxySubscriptionScanResult{SourceID: id, Total: preview.Total, Parsed: len(items), Strategy: strategy, ScannedAt: time.Now()}
 	sidecarCount := 0
 	activeKeys := make(map[string]struct{}, len(items))
+	processedKeys := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		if scanCtx.Err() != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("scan budget reached: %v", scanCtx.Err()))
 			break
-		}
-		if !item.Valid {
-			result.Skipped++
-			if item.Error != "" {
-				result.Errors = append(result.Errors, item.Error)
-			}
-			continue
 		}
 		key := item.Key
 		if key == "" {
 			key = proxyImportItemKey(item)
 		}
 		activeKeys[key] = struct{}{}
+		// Keep the first occurrence for each node key. Duplicate can also mean
+		// an already-existing proxy, which still needs a node status record.
+		if _, processed := processedKeys[key]; processed {
+			result.Skipped++
+			continue
+		}
+		processedKeys[key] = struct{}{}
+		if !item.Valid {
+			result.Skipped++
+			invalidError := defaultString(item.Error, "节点格式无效，无法加入 IP 管理")
+			if _, upsertErr := s.upsertProxySubscriptionNode(scanCtx, id, item, key, proxySubscriptionNodeEvaluation{Key: key, LastError: invalidError}, "invalid", false); upsertErr != nil {
+				result.Errors = append(result.Errors, upsertErr.Error())
+				continue
+			}
+			if managementErr := s.updateProxySubscriptionNodeManagementByKey(scanCtx, id, key, "failed", invalidError, nil); managementErr != nil {
+				result.Errors = append(result.Errors, managementErr.Error())
+			}
+			if previousNode, existed := existingNodes[key]; existed && previousNode.ManagementStatus == "managed" {
+				if retireErr := s.retireProxySubscriptionNodeResources(scanCtx, previousNode, invalidError); retireErr != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("回收旧 IP 管理资源失败: %v", retireErr))
+				}
+			}
+			result.ManagementFailed++
+			continue
+		}
 		eval, ok := evaluations[key]
 		if !ok {
 			eval = proxySubscriptionNodeEvaluation{Key: key, Country: inferProxySubscriptionCountry(item)}
@@ -945,6 +969,28 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 			continue
 		}
 		result.Saved++
+		managementStatus := "not_selected"
+		managementError := ""
+		var managedProxyID *int64
+		if isSelected {
+			managementStatus = "failed"
+			managementError = "节点未能加入 IP 管理"
+		} else {
+			switch status {
+			case "unsupported":
+				managementError = defaultString(eval.LastError, "sidecar 协议不受当前运行时支持")
+			case "sidecar_disabled":
+				managementError = "订阅源未启用 sidecar，未尝试加入 IP 管理"
+			case "sleeping":
+				managementError = "节点处于休眠窗口，暂未加入 IP 管理"
+			case "timeout":
+				managementError = "节点连接探测超时，未加入 IP 管理"
+			case "degraded":
+				managementError = defaultString(eval.LastError, "节点质量未达到当前策略要求")
+			default:
+				managementError = "未通过当前筛选策略，未尝试加入 IP 管理"
+			}
+		}
 		if isSelected {
 			result.Selected++
 		}
@@ -953,22 +999,47 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id i
 			if isSelected && source.SidecarEnabled && sidecarCount < strategy.MaxActiveSidecarNodes {
 				port, portErr := s.allocateProxySidecarPort(scanCtx, source, nodeID)
 				if portErr != nil {
+					managementError = fmt.Sprintf("sidecar 端口分配失败: %v", portErr)
 					result.Errors = append(result.Errors, portErr.Error())
 				} else if err := s.reserveProxySidecarEndpoint(scanCtx, source, nodeID, port); err != nil {
+					managementError = fmt.Sprintf("sidecar 端点预留失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
 				} else if err := s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
+					managementError = fmt.Sprintf("sidecar 加入 IP 管理失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
 				} else {
+					managementStatus = "managed"
+					managedProxyID = s.findSubscriptionNodeProxyID(scanCtx, nodeID)
 					sidecarCount++
 				}
+			} else if isSelected && source.SidecarEnabled && strategy.MaxActiveSidecarNodes > 0 && sidecarCount >= strategy.MaxActiveSidecarNodes {
+				managementError = fmt.Sprintf("超过 sidecar 节点上限（%d）", strategy.MaxActiveSidecarNodes)
 			}
 		} else {
 			result.DirectImportable++
 			if isSelected {
 				if err := s.upsertDirectProxyFromSubscriptionNode(scanCtx, source, item, eval); err != nil {
+					managementError = fmt.Sprintf("加入 IP 管理失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
+				} else {
+					managementStatus = "managed"
+					managedProxyID = s.findDirectSubscriptionProxyID(scanCtx, item)
 				}
 			}
+		}
+		if managementStatus == "managed" {
+			result.Managed++
+		} else if isSelected {
+			result.ManagementFailed++
+		}
+		if previousNode, existed := existingNodes[key]; existed && previousNode.ManagementStatus == "managed" && managementStatus != "managed" {
+			retireReason := defaultString(managementError, "节点已不再满足当前 IP 管理策略")
+			if retireErr := s.retireProxySubscriptionNodeResources(scanCtx, previousNode, retireReason); retireErr != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("回收旧 IP 管理资源失败: %v", retireErr))
+			}
+		}
+		if managementErr := s.updateProxySubscriptionNodeManagement(scanCtx, nodeID, id, managementStatus, managementError, managedProxyID); managementErr != nil {
+			result.Errors = append(result.Errors, managementErr.Error())
 		}
 	}
 	if scanCtx.Err() == nil {
@@ -1044,7 +1115,8 @@ SELECT id, source_id, node_key, raw_uri, name, protocol, server, port, COALESCE(
        COALESCE(country_hint, ''), COALESCE(exit_ip, ''), COALESCE(exit_country, ''),
        COALESCE(exit_country_code, ''), latency_ms, ip_clean_score, COALESCE(reputation_provider, ''),
        reputation_checked_at, score, status, failure_count, timeout_count, sleep_until,
-       last_scanned_at, COALESCE(last_error, ''), selected, sidecar_required, created_at, updated_at
+	       last_scanned_at, COALESCE(last_error, ''), COALESCE(management_status, 'not_selected'),
+	       COALESCE(management_error, ''), managed_proxy_id, selected, sidecar_required, created_at, updated_at
 FROM proxy_subscription_nodes
 WHERE source_id = $1 AND deleted_at IS NULL
 ORDER BY selected DESC, score DESC, id ASC`, sourceID)
@@ -1057,12 +1129,46 @@ ORDER BY selected DESC, score DESC, id ASC`, sourceID)
 	var nodes []ProxySubscriptionNode
 	for rows.Next() {
 		var n ProxySubscriptionNode
-		if err := rows.Scan(&n.ID, &n.SourceID, &n.NodeKey, &n.RawURI, &n.Name, &n.Protocol, &n.Server, &n.Port, &n.Username, &n.CountryHint, &n.ExitIP, &n.ExitCountry, &n.ExitCountryCode, &n.LatencyMs, &n.IPCleanScore, &n.ReputationProvider, &n.ReputationCheckedAt, &n.Score, &n.Status, &n.FailureCount, &n.TimeoutCount, &n.SleepUntil, &n.LastScannedAt, &n.LastError, &n.Selected, &n.SidecarRequired, &n.CreatedAt, &n.UpdatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.SourceID, &n.NodeKey, &n.RawURI, &n.Name, &n.Protocol, &n.Server, &n.Port, &n.Username, &n.CountryHint, &n.ExitIP, &n.ExitCountry, &n.ExitCountryCode, &n.LatencyMs, &n.IPCleanScore, &n.ReputationProvider, &n.ReputationCheckedAt, &n.Score, &n.Status, &n.FailureCount, &n.TimeoutCount, &n.SleepUntil, &n.LastScannedAt, &n.LastError, &n.ManagementStatus, &n.ManagementError, &n.ManagedProxyID, &n.Selected, &n.SidecarRequired, &n.CreatedAt, &n.UpdatedAt); err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, n)
 	}
 	return nodes, rows.Err()
+}
+
+func (s *adminServiceImpl) updateProxySubscriptionNodeManagement(ctx context.Context, nodeID, sourceID int64, status, managementError string, proxyID *int64) error {
+	_, err := s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_nodes SET management_status = $3, management_error = NULLIF($4, ''), managed_proxy_id = $5, updated_at = NOW() WHERE id = $1 AND source_id = $2`, nodeID, sourceID, status, managementError, proxyID)
+	return err
+}
+
+func (s *adminServiceImpl) updateProxySubscriptionNodeManagementByKey(ctx context.Context, sourceID int64, nodeKey, status, managementError string, proxyID *int64) error {
+	_, err := s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_nodes SET management_status = $3, management_error = NULLIF($4, ''), managed_proxy_id = $5, updated_at = NOW() WHERE source_id = $1 AND node_key = $2 AND deleted_at IS NULL`, sourceID, nodeKey, status, managementError, proxyID)
+	return err
+}
+
+func (s *adminServiceImpl) findSubscriptionNodeProxyID(ctx context.Context, nodeID int64) *int64 {
+	rows, err := s.entClient.QueryContext(ctx, `SELECT proxy_id FROM proxy_sidecar_endpoints WHERE node_id = $1 AND deleted_at IS NULL LIMIT 1`, nodeID)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		return nil
+	}
+	var id sql.NullInt64
+	if err := rows.Scan(&id); err != nil || !id.Valid {
+		return nil
+	}
+	return &id.Int64
+}
+
+func (s *adminServiceImpl) findDirectSubscriptionProxyID(ctx context.Context, item ProxyImportPreviewItem) *int64 {
+	proxy, exists, err := s.findProxyByAddress(ctx, item.Host, item.Port, item.Username, item.Password)
+	if err != nil || !exists || proxy == nil {
+		return nil
+	}
+	return &proxy.ID
 }
 func (s *adminServiceImpl) getProxySubscriptionSourceForScan(ctx context.Context, id int64) (*ProxySubscriptionSource, error) {
 	rows, err := s.entClient.QueryContext(ctx, `
@@ -1472,8 +1578,15 @@ func (s *adminServiceImpl) markMissingProxySubscriptionNodes(ctx context.Context
 		}
 		if _, execErr := s.entClient.ExecContext(ctx, `
 UPDATE proxy_subscription_nodes
-SET status = 'missing', selected = FALSE, last_error = $2, updated_at = NOW()
-WHERE id = $1`, node.ID, "subscription node missing from latest scan"); execErr != nil {
+
+SET status = 'missing',
+    selected = FALSE,
+    last_error = $2,
+    management_status = 'failed',
+    management_error = $2,
+    managed_proxy_id = NULL,
+    updated_at = NOW()
+WHERE id = $1`, node.ID, "subscription node missing from latest scan; IP 管理资源已回收"); execErr != nil {
 			return execErr
 		}
 	}
@@ -1785,6 +1898,9 @@ WHERE source_id = $1 AND deleted_at IS NULL`, sourceID, reason)
 func (s *adminServiceImpl) retireProxySubscriptionNodeResources(ctx context.Context, node ProxySubscriptionNode, reason string) error {
 	if node.SidecarRequired {
 		return s.retireSidecarProxyForSubscriptionNode(ctx, node.ID, reason)
+	}
+	if node.ManagedProxyID != nil && *node.ManagedProxyID > 0 {
+		return s.retireProxyByID(ctx, *node.ManagedProxyID, reason)
 	}
 	item := parseProxyLine(node.RawURI, "")
 	if !item.Valid {

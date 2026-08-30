@@ -1119,6 +1119,9 @@ export interface ProxySubscriptionNode {
   sleep_until?: string | null;
   last_scanned_at?: string | null;
   last_error?: string;
+  management_status: "managed" | "failed" | "not_selected" | string;
+  management_error?: string;
+  managed_proxy_id?: number;
   selected: boolean;
   sidecar_required: boolean;
   created_at: string;
@@ -1134,6 +1137,8 @@ export interface ProxySubscriptionScanResult {
   sidecar_required: number;
   direct_importable: number;
   skipped: number;
+  managed?: number;
+  management_failed?: number;
   errors?: string[];
   strategy: ProxySubscriptionStrategy;
   scanned_at: string;

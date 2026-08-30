@@ -410,7 +410,11 @@
             <div class="text-sm font-medium text-gray-900 dark:text-white">筛选与配额</div>
             <div class="grid gap-3 sm:grid-cols-2">
               <label class="text-sm text-gray-700 dark:text-gray-200">最大导入节点数<input v-model.number="subscriptionForm.strategy.max_enabled_nodes" class="input mt-1 w-full" type="number" min="1" /></label>
-              <label class="text-sm text-gray-700 dark:text-gray-200">活跃出口数<input v-model.number="subscriptionForm.strategy.max_active_sidecar_nodes" class="input mt-1 w-full" type="number" min="1" /></label>
+              <label class="text-sm text-gray-700 dark:text-gray-200">
+                活跃出口数
+                <input v-model.number="subscriptionForm.strategy.max_active_sidecar_nodes" class="input mt-1 w-full" type="number" min="1" />
+                <span class="mt-1 block text-xs text-gray-500 dark:text-dark-300">默认 3，可按端口池和资源容量调整</span>
+              </label>
               <label class="text-sm text-gray-700 dark:text-gray-200">备用节点数<input v-model.number="subscriptionForm.strategy.standby_nodes" class="input mt-1 w-full" type="number" min="0" /></label>
               <label class="text-sm text-gray-700 dark:text-gray-200">每国家节点上限<input v-model.number="subscriptionForm.strategy.max_nodes_per_country" class="input mt-1 w-full" type="number" min="1" /></label>
               <label class="text-sm text-gray-700 dark:text-gray-200">最少国家数<input v-model.number="subscriptionForm.strategy.min_country_count" class="input mt-1 w-full" type="number" min="1" /></label>
@@ -504,6 +508,20 @@
             <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ selectedNodeSource ? readScanNumber(selectedNodeSource.last_scan_result, 'selected') ?? '-' : '-' }}</div>
           </div>
         </div>
+        <div class="grid gap-3 sm:grid-cols-3">
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 text-sm dark:border-emerald-900/60 dark:bg-emerald-950/20">
+            <div class="text-xs text-emerald-700 dark:text-emerald-300">已加入 IP 管理</div>
+            <div class="mt-1 font-semibold text-emerald-800 dark:text-emerald-200">{{ nodeManagementSummary.managed }}</div>
+          </div>
+          <div class="rounded-lg border border-rose-200 bg-rose-50/60 p-3 text-sm dark:border-rose-900/60 dark:bg-rose-950/20">
+            <div class="text-xs text-rose-700 dark:text-rose-300">加入失败</div>
+            <div class="mt-1 font-semibold text-rose-800 dark:text-rose-200">{{ nodeManagementSummary.failed }}</div>
+          </div>
+          <div class="rounded-lg border border-gray-200 bg-gray-50/80 p-3 text-sm dark:border-dark-700 dark:bg-dark-900/50">
+            <div class="text-xs text-gray-600 dark:text-dark-300">未加入</div>
+            <div class="mt-1 font-semibold text-gray-800 dark:text-dark-100">{{ nodeManagementSummary.pending }}</div>
+          </div>
+        </div>
 
         <div class="grid gap-3 rounded-lg border border-gray-200 bg-gray-50/60 p-4 dark:border-dark-700 dark:bg-dark-900/40 lg:grid-cols-4">
           <div class="lg:col-span-4">
@@ -557,6 +575,15 @@
               <option value="excluded">不可选</option>
               <option value="sleeping">休眠</option>
               <option value="missing">缺失</option>
+            </select>
+          </label>
+          <label class="space-y-1 text-sm">
+            <span class="text-xs text-gray-500">IP 管理筛选</span>
+            <select v-model="nodeManagementFilter" class="input w-full">
+              <option value="">全部管理状态</option>
+              <option value="managed">已加入 IP 管理</option>
+              <option value="failed">加入失败</option>
+              <option value="not_selected">未加入</option>
             </select>
           </label>
           <label class="space-y-1 text-sm">
@@ -621,6 +648,7 @@
                 <th class="px-3 py-2">分数</th>
                 <th class="px-3 py-2">运行指标</th>
                 <th class="px-3 py-2">状态与原因</th>
+                <th class="px-3 py-2">IP 管理状态</th>
               </tr>
             </thead>
             <tbody>
@@ -663,9 +691,17 @@
                   <div class="mt-1 text-xs text-gray-500">{{ row.reason }}</div>
                   <div v-if="row.node.last_error" class="mt-1 text-xs text-red-500">{{ row.node.last_error }}</div>
                 </td>
+                <td class="px-3 py-2">
+                  <span :class="['badge', row.node.management_status === 'managed' ? 'badge-success' : row.node.management_status === 'failed' ? 'badge-danger' : 'badge-gray']">
+                    {{ row.node.management_status === 'managed' ? '已加入' : row.node.management_status === 'failed' ? '加入失败' : '未加入' }}
+                  </span>
+                  <div v-if="row.node.managed_proxy_id" class="mt-1 text-xs text-gray-500">代理 #{{ row.node.managed_proxy_id }}</div>
+                  <div v-if="row.node.management_error" class="mt-1 max-w-[260px] text-xs text-rose-600 dark:text-rose-300">{{ row.node.management_error }}</div>
+                  <div v-else-if="row.node.management_status === 'not_selected'" class="mt-1 text-xs text-gray-500">未通过当前筛选策略</div>
+                </td>
               </tr>
               <tr v-if="!filteredNodePreviewRows.length">
-                <td colspan="9" class="px-3 py-8 text-center text-sm text-gray-500">暂无匹配节点</td>
+                <td colspan="10" class="px-3 py-8 text-center text-sm text-gray-500">暂无匹配节点</td>
               </tr>
             </tbody>
           </table>
@@ -722,7 +758,7 @@ function defaultStrategy(): ProxySubscriptionStrategy {
   return {
     max_parsed_nodes: 200,
     max_enabled_nodes: 20,
-    max_active_sidecar_nodes: 5,
+    max_active_sidecar_nodes: 3,
     max_probe_concurrency: 3,
     scan_batch_size: 5,
     standby_nodes: 2,
@@ -793,6 +829,7 @@ const savingSubscription = ref(false)
 const savingAbuseIPDBKey = ref(false)
 const savingNodeStrategy = ref(false)
 const nodeStatusFilter = ref('')
+const nodeManagementFilter = ref('')
 const nodeReasonFilter = ref('')
 const nodeSortKey = ref<'preview' | 'score' | 'latency' | 'clean' | 'country' | 'name'>('preview')
 const importContent = ref('')
@@ -856,9 +893,11 @@ type NodeStrategyPreset = typeof nodeStrategyPresets[number]['key']
 const nodePreviewRows = computed<NodePreviewRow[]>(() => previewSubscriptionNodes(subscriptionNodes.value, nodeStrategyDraft, selectedNodeSource.value))
 const filteredNodePreviewRows = computed(() => {
   const status = nodeStatusFilter.value
+  const managementStatus = nodeManagementFilter.value
   const reason = nodeReasonFilter.value
   return sortNodeRows(nodePreviewRows.value.filter(row => {
     if (status && row.preview_status !== status) return false
+    if (managementStatus && (row.management_status || 'not_selected') !== managementStatus) return false
     if (reason && reasonCategory(row.preview_reason) !== reason) return false
     return true
   })).map(row => ({
@@ -877,6 +916,14 @@ const nodePreviewSummary = computed(() => {
     standby: rows.filter(row => row.preview_status === 'standby').length,
     excluded: rows.filter(row => row.preview_status === 'excluded' || row.preview_status === 'missing' || row.preview_status === 'sleeping').length,
     countryCount: new Set(selectedRows.map(row => row.preview_country || 'unknown')).size
+  }
+})
+const nodeManagementSummary = computed(() => {
+  const rows = subscriptionNodes.value
+  return {
+    managed: rows.filter(node => node.management_status === 'managed').length,
+    failed: rows.filter(node => node.management_status === 'failed').length,
+    pending: rows.filter(node => !node.management_status || node.management_status === 'not_selected').length
   }
 })
 const nodeReasonOptions = computed(() => {
@@ -1257,7 +1304,9 @@ function formatScanResultSummary(result: Record<string, unknown> | undefined) {
   const saved = readScanNumber(result, 'saved')
   const selected = readScanNumber(result, 'selected')
   const errors = proxySubscriptionScanErrorCount(result)
-  return `解析 ${parsed ?? '-'} / 入库 ${saved ?? '-'} / 选中 ${selected ?? '-'} / 错误 ${errors ?? 0}`
+  const managed = readScanNumber(result, 'managed')
+  const failed = readScanNumber(result, 'management_failed')
+  return `解析 ${parsed ?? '-'} / 入库 ${saved ?? '-'} / 选中 ${selected ?? '-'} / 已加入 ${managed ?? '-'} / 加入失败 ${failed ?? errors ?? 0} / 错误 ${errors ?? 0}`
 }
 
 function isScanning(id: number) {
@@ -1649,6 +1698,7 @@ async function openSubscriptionNodes(source: ProxySubscriptionSource, pushRoute 
     selectedNodeSource.value = source
     applyNodeStrategyDraft(source.strategy)
     nodeStatusFilter.value = ''
+    nodeManagementFilter.value = ''
     const nodes = await adminAPI.proxies.listProxySubscriptionNodes(source.id)
     subscriptionNodes.value = toArray(nodes)
     showNodesDialog.value = true
@@ -1662,6 +1712,7 @@ async function closeSubscriptionNodes() {
   selectedNodeSource.value = null
   subscriptionNodes.value = []
   nodeStatusFilter.value = ''
+  nodeManagementFilter.value = ''
   nodeReasonFilter.value = ''
   if (route.name === 'AdminProxyDispatchSubscriptionNodes') {
     await router.push('/admin/proxy-dispatch')

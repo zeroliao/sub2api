@@ -146,3 +146,7 @@ output/
 
 # Vitest / Vite cache at repo root
 .vite/
+
+# Local browser tooling and temporary Go build cache
+.playwright-cli/
+backend/.tmp-go-cache/
