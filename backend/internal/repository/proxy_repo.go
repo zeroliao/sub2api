@@ -10,6 +10,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -291,6 +292,12 @@ func (r *proxyRepository) Delete(ctx context.Context, id int64) error {
 
 func (r *proxyRepository) deleteWithExecutor(ctx context.Context, exec sqlExecutor, client *dbent.Client, id int64) error {
 	if _, err := exec.ExecContext(ctx, `
+		DELETE FROM proxy_sidecar_endpoints
+		WHERE proxy_id = $1
+	`, id); err != nil {
+		return err
+	}
+	if _, err := exec.ExecContext(ctx, `
 		UPDATE accounts
 		SET proxy_id = NULL, updated_at = NOW()
 		WHERE proxy_id = $1 AND deleted_at IS NULL
@@ -307,7 +314,7 @@ func (r *proxyRepository) deleteWithExecutor(ctx context.Context, exec sqlExecut
 	`, id); err != nil {
 		return err
 	}
-	_, err := client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(ctx)
+	_, err := client.Proxy.Delete().Where(proxy.IDEQ(id)).Exec(mixins.SkipSoftDelete(ctx))
 	return err
 }
 

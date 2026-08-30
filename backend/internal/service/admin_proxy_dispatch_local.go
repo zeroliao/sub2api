@@ -895,16 +895,25 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id, 
 	}
 	scanCtx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
+	stateCtx, cancelState := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelState()
 	var preview *ProxyImportPreview
 	preview, err = s.PreviewProxyImport(scanCtx, ProxyImportPreviewInput{URL: source.URL, Provider: source.Provider})
 	if err != nil {
-		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_scan_at = NOW(), last_error = $2, updated_at = NOW() WHERE id = $1`, id, err.Error())
-		return nil, err
+		result, failureErr := s.recordFailedProxySubscriptionScan(stateCtx, id, strategy, 0, 0, err)
+		err = failureErr
+		return result, err
 	}
 	if preview == nil || len(preview.Items) == 0 || preview.Valid == 0 {
 		err = infraerrors.BadRequest("PROXY_SUBSCRIPTION_NO_VALID_NODES", "subscription response contains no valid proxy nodes")
-		_, _ = s.entClient.ExecContext(ctx, `UPDATE proxy_subscription_sources SET last_scan_at = NOW(), last_error = $2, updated_at = NOW() WHERE id = $1`, id, err.Error())
-		return nil, err
+		total, parsed := 0, 0
+		if preview != nil {
+			total = preview.Total
+			parsed = len(preview.Items)
+		}
+		result, failureErr := s.recordFailedProxySubscriptionScan(stateCtx, id, strategy, total, parsed, err)
+		err = failureErr
+		return result, err
 	}
 	items := preview.Items
 	if strategy.MaxParsedNodes > 0 && len(items) > strategy.MaxParsedNodes {
@@ -1020,12 +1029,11 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id, 
 				} else if err := s.reserveProxySidecarEndpoint(scanCtx, source, nodeID, port); err != nil {
 					managementError = fmt.Sprintf("sidecar 端点预留失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
-				} else if err := s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
+				} else if managedProxyID, err = s.upsertSidecarProxyForSubscriptionNode(scanCtx, source, nodeID, item, eval, port); err != nil {
 					managementError = fmt.Sprintf("sidecar 加入 IP 管理失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
 				} else {
 					managementStatus = "managed"
-					managedProxyID = s.findSubscriptionNodeProxyID(scanCtx, nodeID)
 					sidecarCount++
 				}
 			} else if isSelected && source.SidecarEnabled && strategy.MaxActiveSidecarNodes > 0 && sidecarCount >= strategy.MaxActiveSidecarNodes {
@@ -1034,12 +1042,11 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id, 
 		} else {
 			result.DirectImportable++
 			if isSelected {
-				if err := s.upsertDirectProxyFromSubscriptionNode(scanCtx, source, item, eval); err != nil {
+				if managedProxyID, err = s.upsertDirectProxyFromSubscriptionNode(scanCtx, source, nodeID, item, eval); err != nil {
 					managementError = fmt.Sprintf("加入 IP 管理失败: %v", err)
 					result.Errors = append(result.Errors, err.Error())
 				} else {
 					managementStatus = "managed"
-					managedProxyID = s.findDirectSubscriptionProxyID(scanCtx, item)
 				}
 			}
 		}
@@ -1065,7 +1072,7 @@ func (s *adminServiceImpl) scanProxySubscriptionSource(ctx context.Context, id, 
 	} else {
 		result.Errors = append(result.Errors, "scan finished before all nodes were processed, missing-node cleanup skipped")
 	}
-	if err := s.saveProxySubscriptionScanResult(scanCtx, id, result); err != nil {
+	if err := s.saveProxySubscriptionScanResult(stateCtx, id, result); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -1173,28 +1180,54 @@ func (s *adminServiceImpl) updateProxySubscriptionNodeManagementByKey(ctx contex
 	return err
 }
 
-func (s *adminServiceImpl) findSubscriptionNodeProxyID(ctx context.Context, nodeID int64) *int64 {
-	rows, err := s.entClient.QueryContext(ctx, `SELECT proxy_id FROM proxy_sidecar_endpoints WHERE node_id = $1 AND deleted_at IS NULL LIMIT 1`, nodeID)
+func (s *adminServiceImpl) findSubscriptionNodeProxyID(ctx context.Context, nodeID int64) (*int64, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT e.proxy_id
+FROM proxy_sidecar_endpoints e
+JOIN proxies p ON p.id = e.proxy_id
+WHERE e.node_id = $1
+  AND e.deleted_at IS NULL
+  AND p.deleted_at IS NULL
+  AND COALESCE(p.source, 'manual') = 'subscription'
+LIMIT 1`, nodeID)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
-		return nil
+		return nil, rows.Err()
 	}
 	var id sql.NullInt64
 	if err := rows.Scan(&id); err != nil || !id.Valid {
-		return nil
+		return nil, err
 	}
-	return &id.Int64
+	return &id.Int64, rows.Err()
 }
 
-func (s *adminServiceImpl) findDirectSubscriptionProxyID(ctx context.Context, item ProxyImportPreviewItem) *int64 {
-	proxy, exists, err := s.findProxyByAddress(ctx, item.Host, item.Port, item.Username, item.Password)
-	if err != nil || !exists || proxy == nil {
-		return nil
+func (s *adminServiceImpl) findManagedSubscriptionProxyID(ctx context.Context, nodeID int64) (*int64, error) {
+	rows, err := s.entClient.QueryContext(ctx, `
+SELECT p.id
+FROM proxy_subscription_nodes n
+JOIN proxies p ON p.id = n.managed_proxy_id
+WHERE n.id = $1
+  AND n.deleted_at IS NULL
+  AND p.deleted_at IS NULL
+  AND COALESCE(p.source, 'manual') = 'subscription'
+LIMIT 1`, nodeID)
+	if err != nil {
+		return nil, err
 	}
-	return &proxy.ID
+	defer func() {
+		_ = rows.Close()
+	}()
+	if !rows.Next() {
+		return nil, rows.Err()
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		return nil, err
+	}
+	return &id, rows.Err()
 }
 func (s *adminServiceImpl) getProxySubscriptionSourceForScan(ctx context.Context, id int64) (*ProxySubscriptionSource, error) {
 	rows, err := s.entClient.QueryContext(ctx, `
@@ -1951,12 +1984,8 @@ func (s *adminServiceImpl) retireProxySubscriptionSourceResources(ctx context.Co
 		}
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
-UPDATE proxy_sidecar_endpoints
-SET status = 'inactive',
-    last_error = NULLIF($2, ''),
-    deleted_at = NOW(),
-    updated_at = NOW()
-WHERE source_id = $1 AND deleted_at IS NULL`, sourceID, reason); err != nil {
+	DELETE FROM proxy_sidecar_endpoints
+	WHERE source_id = $1`, sourceID); err != nil {
 		return err
 	}
 	_, err = s.entClient.ExecContext(ctx, `
@@ -2004,12 +2033,8 @@ LIMIT 1`, nodeID)
 		return err
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
-UPDATE proxy_sidecar_endpoints
-SET status = 'inactive',
-    last_checked_at = NOW(),
-    last_error = NULLIF($2, ''),
-    updated_at = NOW()
-WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, reason); err != nil {
+	DELETE FROM proxy_sidecar_endpoints
+	WHERE node_id = $1`, nodeID); err != nil {
 		return err
 	}
 	if proxyID.Valid && proxyID.Int64 > 0 {
@@ -2024,27 +2049,14 @@ func (s *adminServiceImpl) retireDirectProxyByAddress(ctx context.Context, host 
 	}
 	return s.retireProxyByID(ctx, proxy.ID, reason)
 }
-func (s *adminServiceImpl) retireProxyByID(ctx context.Context, proxyID int64, reason string) error {
+func (s *adminServiceImpl) retireProxyByID(ctx context.Context, proxyID int64, _ string) error {
 	if proxyID <= 0 {
 		return nil
 	}
-	if _, err := s.entClient.ExecContext(ctx, `
-UPDATE proxies
-SET status = $2,
-    quality_status = 'failed',
-    last_checked_at = NOW(),
-    updated_at = NOW()
-WHERE id = $1 AND deleted_at IS NULL`, proxyID, StatusDisabled); err != nil {
-		return err
-	}
 	_, err := s.entClient.ExecContext(ctx, `
-UPDATE account_proxy_bindings
-SET status = 'proxy_unavailable',
-    last_failure_at = NOW(),
-    last_failure_reason = NULLIF($2, ''),
-    updated_at = NOW()
-WHERE proxy_id = $1
-  AND status = 'active'`, proxyID, reason)
+DELETE FROM proxies
+WHERE id = $1
+  AND COALESCE(source, 'manual') = 'subscription'`, proxyID)
 	return err
 }
 func (s *adminServiceImpl) saveProxySubscriptionScanResult(ctx context.Context, id int64, result *ProxySubscriptionScanResult) error {
@@ -2060,6 +2072,36 @@ UPDATE proxy_subscription_sources
 SET last_scan_at = NOW(), last_scan_result = $2::jsonb, last_error = NULL, updated_at = NOW()
 WHERE id = $1 AND deleted_at IS NULL`, id, string(raw))
 	return err
+}
+
+func (s *adminServiceImpl) recordFailedProxySubscriptionScan(ctx context.Context, id int64, strategy ProxySubscriptionStrategy, total, parsed int, scanErr error) (*ProxySubscriptionScanResult, error) {
+	if scanErr == nil {
+		scanErr = errors.New("subscription scan failed")
+	}
+	result := &ProxySubscriptionScanResult{
+		SourceID:  id,
+		Total:     total,
+		Parsed:    parsed,
+		Strategy:  strategy,
+		ScannedAt: time.Now(),
+		Errors:    []string{scanErr.Error()},
+	}
+	failureErr := scanErr
+	if cleanupErr := s.retireProxySubscriptionSourceResources(ctx, id, scanErr.Error()); cleanupErr != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to retire previous subscription resources: %v", cleanupErr))
+		failureErr = fmt.Errorf("%w; cleanup previous subscription resources: %v", failureErr, cleanupErr)
+	}
+	raw, marshalErr := json.Marshal(result)
+	if marshalErr != nil {
+		return result, fmt.Errorf("%w; persist failed scan result: %v", failureErr, marshalErr)
+	}
+	if _, persistErr := s.entClient.ExecContext(ctx, `
+UPDATE proxy_subscription_sources
+SET last_scan_at = NOW(), last_scan_result = $2::jsonb, last_error = $3, updated_at = NOW()
+WHERE id = $1 AND deleted_at IS NULL`, id, string(raw), scanErr.Error()); persistErr != nil {
+		failureErr = fmt.Errorf("%w; persist failed scan result: %v", failureErr, persistErr)
+	}
+	return result, failureErr
 }
 func (s *adminServiceImpl) lookupProxySubscriptionNodeReputation(ctx context.Context, source *ProxySubscriptionSource, host string, cacheHours int) (*proxyIPReputationResult, error) {
 	if s == nil || s.entClient == nil || source == nil {
@@ -2321,10 +2363,10 @@ ON CONFLICT (ip, provider)
 DO UPDATE SET clean_score = EXCLUDED.clean_score, raw = EXCLUDED.raw, checked_at = EXCLUDED.checked_at, expires_at = EXCLUDED.expires_at`, result.IP, result.Provider, result.CleanScore, string(raw), result.CheckedAt, result.CheckedAt.Add(time.Duration(cacheHours)*time.Hour))
 	return err
 }
-func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation) error {
-	proxy, exists, err := s.findProxyByAddress(ctx, item.Host, item.Port, item.Username, item.Password)
+func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation) (*int64, error) {
+	managedProxyID, err := s.findManagedSubscriptionProxyID(ctx, nodeID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	qualityStatus := ProxyQualityHealthy
 	if (evaluation.IPCleanScore != nil && *evaluation.IPCleanScore < 50) || evaluation.LastError != "" || (evaluation.LatencyMs != nil && *evaluation.LatencyMs > 1500) {
@@ -2334,9 +2376,17 @@ func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Con
 	if name == "" {
 		name = fmt.Sprintf("%s:%d", item.Host, item.Port)
 	}
-	if !exists {
-		_, err := s.CreateProxy(ctx, &CreateProxyInput{Name: name, Protocol: item.Protocol, Host: item.Host, Port: item.Port, Username: item.Username, Password: item.Password, Source: "subscription", ProxyType: defaultString(item.ProxyType, "datacenter"), Provider: source.Provider, Region: defaultString(evaluation.ExitCountryCode, evaluation.Country), ExitIP: evaluation.ExitIP, QualityStatus: qualityStatus, Weight: maxInt(1, evaluation.Score)})
-		return err
+	var proxy *Proxy
+	if managedProxyID != nil {
+		proxy, err = s.GetProxy(ctx, *managedProxyID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		proxy, err = s.CreateProxy(ctx, &CreateProxyInput{Name: name, Protocol: item.Protocol, Host: item.Host, Port: item.Port, Username: item.Username, Password: item.Password, Source: "subscription", ProxyType: defaultString(item.ProxyType, "datacenter"), Provider: source.Provider, Region: defaultString(evaluation.ExitCountryCode, evaluation.Country), ExitIP: evaluation.ExitIP, QualityStatus: qualityStatus, Weight: maxInt(1, evaluation.Score)})
+		if err != nil {
+			return nil, err
+		}
 	}
 	proxy.Name = name
 	proxy.Protocol = item.Protocol
@@ -2346,39 +2396,52 @@ func (s *adminServiceImpl) upsertDirectProxyFromSubscriptionNode(ctx context.Con
 	proxy.Password = item.Password
 	proxy.Status = StatusActive
 	applyProxyUpdateMetadata(proxy, &UpdateProxyInput{Source: "subscription", ProxyType: defaultString(item.ProxyType, "datacenter"), Provider: source.Provider, Region: defaultString(evaluation.ExitCountryCode, evaluation.Country), ExitIP: evaluation.ExitIP, QualityStatus: qualityStatus, Weight: intPtr(maxInt(1, evaluation.Score))})
-	_, err = s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{Name: proxy.Name, Protocol: proxy.Protocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password, Status: StatusActive, Source: proxy.Source, ProxyType: proxy.ProxyType, Provider: proxy.Provider, Region: proxy.Region, ExitIP: proxy.ExitIP, QualityStatus: proxy.QualityStatus, Weight: intPtr(proxy.Weight)})
-	return err
+	updated, err := s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{Name: proxy.Name, Protocol: proxy.Protocol, Host: proxy.Host, Port: proxy.Port, Username: proxy.Username, Password: proxy.Password, Status: StatusActive, Source: proxy.Source, ProxyType: proxy.ProxyType, Provider: proxy.Provider, Region: proxy.Region, ExitIP: proxy.ExitIP, QualityStatus: proxy.QualityStatus, Weight: intPtr(proxy.Weight)})
+	if err != nil {
+		return nil, err
+	}
+	return &updated.ID, nil
 }
-func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation, port int) error {
+func (s *adminServiceImpl) upsertSidecarProxyForSubscriptionNode(ctx context.Context, source *ProxySubscriptionSource, nodeID int64, item ProxyImportPreviewItem, evaluation proxySubscriptionNodeEvaluation, port int) (*int64, error) {
 	proxyName := proxySubscriptionSidecarProxyName(source.Name, item)
 	qualityStatus := ProxyQualityDegraded
 	if evaluation.LastError == "" && evaluation.LatencyMs != nil && *evaluation.LatencyMs <= 1500 {
 		qualityStatus = ProxyQualityHealthy
 	}
 	proxyHost := sidecarProxyHost()
-	proxy, exists, err := s.findProxyByAddress(ctx, proxyHost, port, "", "")
+	var proxy *Proxy
+	var err error
+	existingProxyID, err := s.findSubscriptionNodeProxyID(ctx, nodeID)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if !exists {
+	if existingProxyID != nil {
+		proxy, err = s.GetProxy(ctx, *existingProxyID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
 		proxy, err = s.CreateProxy(ctx, &CreateProxyInput{Name: proxyName, Protocol: "socks5", Host: proxyHost, Port: port, Source: "subscription", ProxyType: "sidecar", Provider: source.Provider, Region: defaultString(evaluation.ExitCountryCode, evaluation.Country), QualityStatus: qualityStatus, Weight: maxInt(1, evaluation.Score)})
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if proxy == nil {
-		return errors.New("sidecar proxy create returned nil proxy")
+		return nil, errors.New("sidecar proxy create returned nil proxy")
 	}
 	if _, err := s.entClient.ExecContext(ctx, `
 UPDATE proxy_sidecar_endpoints
 SET proxy_id = $2, updated_at = NOW()
 WHERE node_id = $1 AND deleted_at IS NULL`, nodeID, proxy.ID); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := s.UpdateProxy(ctx, proxy.ID, &UpdateProxyInput{Name: proxyName, Protocol: "socks5", Host: proxyHost, Port: port, Status: proxy.Status, Source: "subscription", ProxyType: "sidecar", Provider: source.Provider, Region: defaultString(evaluation.ExitCountryCode, evaluation.Country), ExitIP: evaluation.ExitIP, QualityStatus: qualityStatus, Weight: intPtr(maxInt(1, evaluation.Score))}); err != nil {
-		return err
+		return nil, err
 	}
-	return s.refreshProxySidecarEndpointReadiness(ctx, nodeID, proxy.ID, port)
+	if err := s.refreshProxySidecarEndpointReadiness(ctx, nodeID, proxy.ID, port); err != nil {
+		return nil, err
+	}
+	return &proxy.ID, nil
 }
 
 func proxySubscriptionSidecarProxyName(sourceName string, item ProxyImportPreviewItem) string {
@@ -2460,6 +2523,7 @@ WHERE id = (
       AND COALESCE(username, '') = $5
       AND COALESCE(password, '') = $6
       AND deleted_at IS NOT NULL
+      AND COALESCE(source, 'manual') = $12
       AND NOT EXISTS (
           SELECT 1
           FROM proxies active_proxy
@@ -2474,7 +2538,7 @@ WHERE id = (
 )
 	RETURNING id`, input.Name, input.Protocol, input.Host, input.Port,
 		strings.TrimSpace(input.Username), strings.TrimSpace(input.Password), StatusActive,
-		input.ExpiresAt, fallbackMode, input.BackupProxyID, input.ExpiryWarnDays)
+		input.ExpiresAt, fallbackMode, input.BackupProxyID, input.ExpiryWarnDays, defaultString(input.Source, "manual"))
 	if err != nil {
 		return nil, err
 	}
