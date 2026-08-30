@@ -92,7 +92,7 @@ func (s *ProxyRepoSuite) TestDelete() {
 	s.Require().Error(err, "expected error after delete")
 }
 
-func (s *ProxyRepoSuite) TestDeleteUnbindsAccountsAndMarksBindingUnavailable() {
+func (s *ProxyRepoSuite) TestDeleteUnbindsAccountsAndCascadesBindingDeletion() {
 	proxy := s.mustCreateProxy(&service.Proxy{
 		Name:     "to-delete-in-use",
 		Protocol: "http",
@@ -129,15 +129,15 @@ func (s *ProxyRepoSuite) TestDeleteUnbindsAccountsAndMarksBindingUnavailable() {
 	))
 	s.Require().Nil(remainingAccountProxyID, "account proxy_id should be cleared")
 
-	var bindingStatus string
+	var bindingCount int
 	s.Require().NoError(scanSingleRow(
 		s.ctx,
 		s.tx,
-		"SELECT status FROM account_proxy_bindings WHERE identity_key = $1",
+		"SELECT COUNT(*) FROM account_proxy_bindings WHERE identity_key = $1",
 		[]any{"identity-bound-account"},
-		&bindingStatus,
+		&bindingCount,
 	))
-	s.Require().Equal(service.ProxyBindingStatusProxyUnavailable, bindingStatus)
+	s.Require().Zero(bindingCount, "proxy binding should be deleted by the foreign-key cascade")
 }
 
 // --- List / ListWithFilters ---
